@@ -1,0 +1,15 @@
+# Postgres et pgAdmin tournent deja en dehors de ce repo (conteneurs "postgres" / pgAdmin
+# existants, base recouvrement_db avec l'utilisateur recouvrement_user). Ce compose ne
+# gere que le backend, pour eviter un conflit de port sur 5432.
+services:
+  backend:
+    build: .
+    container_name: recouvrement_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://recouvrement_user:recouvrement_password@host.docker.internal:5432/recouvrement_db
+      CORS_ORIGINS: '["http://localhost:4200"]'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
