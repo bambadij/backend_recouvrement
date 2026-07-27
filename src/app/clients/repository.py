@@ -25,6 +25,14 @@ class ClientRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_telephone(self, telephone: str, organisation_id: int) -> Client | None:
+        result = await self.db.execute(
+            select(Client)
+            .where(Client.telephone == telephone, Client.organisation_id == organisation_id)
+            .limit(1)
+        )
+        return result.scalars().first()
+
     async def list(
         self, skip: int = 0, limit: int = 100, search: str | None = None, organisation_id: int | None = None
     ) -> list[Client]:

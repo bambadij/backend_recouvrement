@@ -8,14 +8,15 @@ from app.creances.models import StatutCreance
 
 class CreanceBase(BaseModel):
     client_id: int
-    reference: str
     description: str | None = None
     montant_initial: Decimal = Field(gt=0)
     date_echeance: date
 
 
 class CreanceCreate(CreanceBase):
-    pass
+    # Optionnelle : si absente, le service génère une référence unique par organisation.
+    reference: str | None = None
+    statut: StatutCreance = StatutCreance.EN_COURS
 
 
 class CreanceUpdate(BaseModel):

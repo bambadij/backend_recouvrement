@@ -21,6 +21,12 @@ class CreanceRepository:
     async def get_by_id(self, creance_id: int) -> Creance | None:
         return await self.db.get(Creance, creance_id)
 
+    async def count(self, organisation_id: int) -> int:
+        result = await self.db.execute(
+            select(func.count()).select_from(Creance).where(Creance.organisation_id == organisation_id)
+        )
+        return int(result.scalar_one())
+
     async def get_by_reference(self, reference: str, organisation_id: int) -> Creance | None:
         result = await self.db.execute(
             select(Creance).where(Creance.reference == reference, Creance.organisation_id == organisation_id)

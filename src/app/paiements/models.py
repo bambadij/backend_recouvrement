@@ -33,6 +33,9 @@ class Paiement(Base):
     reference: Mapped[str | None] = mapped_column(String(100))
     notes: Mapped[str | None] = mapped_column(String(1000))
 
+    # Nom de l'utilisateur ayant saisi l'encaissement (snapshot au moment du paiement).
+    saisi_par_nom: Mapped[str | None] = mapped_column(String(200))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     creance: Mapped["Creance"] = relationship(back_populates="paiements")

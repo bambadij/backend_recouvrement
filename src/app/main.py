@@ -12,6 +12,7 @@ from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.exceptions import AppException, app_exception_handler
 from app.creances import models as creances_models  # noqa: F401
 from app.creances.router import router as creances_router
+from app.imports.router import router as imports_router
 from app.organisations import models as organisations_models  # noqa: F401
 from app.organisations.router import router as organisations_router
 from app.paiements import models as paiements_models  # noqa: F401
@@ -54,6 +55,7 @@ app.include_router(clients_router)
 app.include_router(creances_router)
 app.include_router(paiements_router)
 app.include_router(relances_router)
+app.include_router(imports_router)
 
 
 @app.get("/health")

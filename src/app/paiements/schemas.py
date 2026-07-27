@@ -30,4 +30,5 @@ class PaiementRead(BaseModel):
     mode_paiement: ModePaiement
     reference: str | None
     notes: str | None
+    saisi_par_nom: str | None
     created_at: datetime

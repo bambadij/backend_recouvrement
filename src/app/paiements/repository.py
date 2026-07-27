@@ -11,8 +11,10 @@ class PaiementRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def create(self, data: PaiementCreate, organisation_id: int) -> Paiement:
-        paiement = Paiement(**data.model_dump(), organisation_id=organisation_id)
+    async def create(
+        self, data: PaiementCreate, organisation_id: int, saisi_par_nom: str | None = None
+    ) -> Paiement:
+        paiement = Paiement(**data.model_dump(), organisation_id=organisation_id, saisi_par_nom=saisi_par_nom)
         self.db.add(paiement)
         await self.db.commit()
         await self.db.refresh(paiement)

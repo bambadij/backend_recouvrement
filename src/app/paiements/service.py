@@ -15,7 +15,10 @@ class PaiementService:
     async def create_paiement(self, data: PaiementCreate) -> Paiement:
         await self.creance_service.enregistrer_paiement(data.creance_id, data.montant)
         # enregistrer_paiement a deja verifie que current_user appartient a une organisation
-        return await self.repository.create(data, self.current_user.organisation_id)  # type: ignore[arg-type]
+        saisi_par_nom = f"{self.current_user.prenom} {self.current_user.nom}".strip() or None
+        return await self.repository.create(
+            data, self.current_user.organisation_id, saisi_par_nom=saisi_par_nom  # type: ignore[arg-type]
+        )
 
     async def get_paiement(self, paiement_id: int) -> Paiement:
         paiement = await self.repository.get_by_id(paiement_id)
