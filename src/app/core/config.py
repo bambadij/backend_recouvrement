@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
 
+    # Redaction assistee des relances. Sans cle, la fonctionnalite est simplement
+    # indisponible : l'API renvoie une erreur explicite et l'interface garde ses
+    # modeles de message figes comme repli.
+    anthropic_api_key: str | None = None
+    #: Modele utilise pour la redaction. Surchargeable sans toucher au code.
+    anthropic_model: str = "claude-opus-5"
+
     # Si definis, un compte SUPER_ADMIN est cree automatiquement au demarrage
     # (uniquement si aucun compte n'existe deja pour cet email).
     super_admin_email: str | None = None
