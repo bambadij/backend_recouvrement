@@ -3,7 +3,7 @@ from app.core.security import hash_password, verify_password
 from app.organisations.service import OrganisationService
 from app.users.models import RoleUtilisateur, User
 from app.users.repository import UserRepository
-from app.users.schemas import UserCreate, UserUpdate
+from app.users.schemas import UserCreate, UserSelfUpdate, UserUpdate
 
 
 class UserService:
@@ -70,6 +70,18 @@ class UserService:
 
         hashed_password = hash_password(data.password) if data.password else None
         return await self.repository.update(user, data, hashed_password)
+
+    async def update_me(self, user: User, data: UserSelfUpdate) -> User:
+        """Mise a jour de son propre compte : profil et mot de passe, rien d'autre."""
+        hashed_password = None
+        if data.nouveau_mot_de_passe:
+            if not data.mot_de_passe_actuel:
+                raise BadRequestException("Le mot de passe actuel est requis pour en definir un nouveau")
+            if not verify_password(data.mot_de_passe_actuel, user.hashed_password):
+                raise BadRequestException("Mot de passe actuel incorrect")
+            hashed_password = hash_password(data.nouveau_mot_de_passe)
+
+        return await self.repository.update_profil(user, data.nom, data.prenom, hashed_password)
 
     async def delete_user(self, user_id: int, current_admin: User) -> None:
         user = await self.get_user_scoped(user_id, current_admin)

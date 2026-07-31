@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 class TypeRelance(str, enum.Enum):
     EMAIL = "EMAIL"
     SMS = "SMS"
+    WHATSAPP = "WHATSAPP"
     APPEL = "APPEL"
     COURRIER = "COURRIER"
     MISE_EN_DEMEURE = "MISE_EN_DEMEURE"

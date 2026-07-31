@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, status
 
 from app.relances.dependencies import RelanceServiceDep
+from app.relances.models import StatutRelance
 from app.relances.schemas import RelanceCreate, RelanceRead, RelanceUpdate
 
 router = APIRouter(prefix="/relances", tags=["relances"])
@@ -18,8 +19,14 @@ async def list_relances(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     creance_id: int | None = None,
+    statut: StatutRelance | None = None,
+    avec_resultat: bool | None = Query(
+        None, description="true : uniquement les relances portant un resultat (engagement obtenu)"
+    ),
 ) -> list[RelanceRead]:
-    relances = await service.list_relances(skip=skip, limit=limit, creance_id=creance_id)
+    relances = await service.list_relances(
+        skip=skip, limit=limit, creance_id=creance_id, statut=statut, avec_resultat=avec_resultat
+    )
     return [RelanceRead.model_validate(r) for r in relances]
 
 

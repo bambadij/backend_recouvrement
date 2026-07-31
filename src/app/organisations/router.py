@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, status
 
 from app.core.exceptions import NotFoundException
 from app.organisations.dependencies import OrganisationServiceDep, OrganisationStatsServiceDep
-from app.organisations.schemas import OrganisationCreate, OrganisationRead, OrganisationStats, OrganisationUpdate
+from app.organisations.schemas import ApercuOrganisation, OrganisationCreate, RecouvrementCompare, OrganisationRead, OrganisationStats, OrganisationUpdate
 from app.users.dependencies import CurrentSuperAdminDep, CurrentUserDep
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
@@ -37,11 +37,22 @@ async def get_my_organisation(current_user: CurrentUserDep, service: Organisatio
 
 @router.get("/me/stats", response_model=OrganisationStats)
 async def get_my_organisation_stats(
-    current_user: CurrentUserDep, service: OrganisationStatsServiceDep
+    current_user: CurrentUserDep,
+    service: OrganisationStatsServiceDep,
+    periode_jours: int = Query(
+        90, ge=7, le=730, description="Fenetre glissante, en jours, des indicateurs d'efficacite"
+    ),
 ) -> OrganisationStats:
     if current_user.organisation_id is None:
         raise NotFoundException("Le SUPER_ADMIN n'appartient a aucune organisation")
-    return await service.get_stats(current_user.organisation_id)
+    return await service.get_stats(current_user.organisation_id, periode_jours)
+
+
+@router.get("/apercu", response_model=list[ApercuOrganisation])
+async def apercu_organisations(
+    service: OrganisationStatsServiceDep, _super_admin: CurrentSuperAdminDep
+) -> list[ApercuOrganisation]:
+    return await service.apercu_organisations()
 
 
 @router.get("/{organisation_id}", response_model=OrganisationRead)
@@ -52,11 +63,37 @@ async def get_organisation(
     return OrganisationRead.model_validate(organisation)
 
 
+@router.get("/recouvrement-compare", response_model=RecouvrementCompare)
+async def recouvrement_compare(
+    service: OrganisationStatsServiceDep,
+    _super_admin: CurrentSuperAdminDep,
+    nb_mois: int = Query(6, ge=2, le=24, description="Nombre de mois calendaires, mois courant inclus"),
+) -> RecouvrementCompare:
+    return await service.recouvrement_compare(nb_mois)
+
+
+@router.get("/plateforme/stats", response_model=OrganisationStats)
+async def get_stats_plateforme(
+    service: OrganisationStatsServiceDep,
+    _super_admin: CurrentSuperAdminDep,
+    periode_jours: int = Query(
+        90, ge=7, le=730, description="Fenetre glissante, en jours, des indicateurs d'efficacite"
+    ),
+) -> OrganisationStats:
+    """Agregat de toutes les organisations. Reserve au SUPER_ADMIN."""
+    return await service.get_stats(None, periode_jours)
+
+
 @router.get("/{organisation_id}/stats", response_model=OrganisationStats)
 async def get_organisation_stats(
-    organisation_id: int, service: OrganisationStatsServiceDep, _super_admin: CurrentSuperAdminDep
+    organisation_id: int,
+    service: OrganisationStatsServiceDep,
+    _super_admin: CurrentSuperAdminDep,
+    periode_jours: int = Query(
+        90, ge=7, le=730, description="Fenetre glissante, en jours, des indicateurs d'efficacite"
+    ),
 ) -> OrganisationStats:
-    return await service.get_stats(organisation_id)
+    return await service.get_stats(organisation_id, periode_jours)
 
 
 @router.patch("/{organisation_id}", response_model=OrganisationRead)

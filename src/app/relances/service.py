@@ -1,6 +1,6 @@
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.creances.service import CreanceService
-from app.relances.models import Relance
+from app.relances.models import Relance, StatutRelance
 from app.relances.repository import RelanceRepository
 from app.relances.schemas import RelanceCreate, RelanceUpdate
 from app.users.models import User
@@ -31,9 +31,21 @@ class RelanceService:
             raise NotFoundException(f"Relance {relance_id} introuvable")
         return relance
 
-    async def list_relances(self, skip: int = 0, limit: int = 100, creance_id: int | None = None) -> list[Relance]:
+    async def list_relances(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        creance_id: int | None = None,
+        statut: StatutRelance | None = None,
+        avec_resultat: bool | None = None,
+    ) -> list[Relance]:
         return await self.repository.list(
-            skip=skip, limit=limit, creance_id=creance_id, organisation_id=self.current_user.organisation_id
+            skip=skip,
+            limit=limit,
+            creance_id=creance_id,
+            organisation_id=self.current_user.organisation_id,
+            statut=statut,
+            avec_resultat=avec_resultat,
         )
 
     async def update_relance(self, relance_id: int, data: RelanceUpdate) -> Relance:
