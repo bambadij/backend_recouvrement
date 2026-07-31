@@ -9,6 +9,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.creances.models import Creance
+    from app.promesses.models import Promesse
 
 
 class TypeRelance(str, enum.Enum):
@@ -41,6 +42,13 @@ class Relance(Base):
     contenu: Mapped[str | None] = mapped_column(String(2000))
     resultat: Mapped[str | None] = mapped_column(String(1000))
 
+    # Nom de l'agent ayant emis la relance, fige au moment de l'emission — meme
+    # convention que Paiement.saisi_par_nom. Un instantane plutot qu'une cle
+    # etrangere : la productivite passee ne doit pas changer si un compte est
+    # renomme ou supprime. Nul sur les relances anterieures a ce champ.
+    cree_par_nom: Mapped[str | None] = mapped_column(String(200), index=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     creance: Mapped["Creance"] = relationship(back_populates="relances")
+    promesses: Mapped[list["Promesse"]] = relationship(back_populates="relance")

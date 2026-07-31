@@ -56,6 +56,12 @@ class Efficacite(BaseModel):
     flux_periode: Decimal
     dso: int | None
     delai_moyen: int | None
+    #: Collection Effectiveness Index, en pourcentage. Part de ce qui *pouvait*
+    #: etre encaisse sur la periode qui l'a effectivement ete. Contrairement au
+    #: DSO, il neutralise l'effet du volume de creances nouvelles : un cabinet qui
+    #: recoit deux fois plus de dossiers voit son DSO gonfler sans avoir moins
+    #: bien travaille, son CEI non. None quand la base de calcul est vide.
+    cei: int | None = None
 
 
 class PointBalanceAgee(BaseModel):
@@ -119,6 +125,93 @@ class RecouvrementCompare(BaseModel):
     series: list[SerieRecouvrement]
 
 
+class CaseRisque(BaseModel):
+    """Une case de la cartographie : croisement d'un segment et d'un potentiel."""
+
+    segment: str
+    potentiel: str
+    nb_creances: int
+    montant: Decimal
+
+
+class StatsPromesses(BaseModel):
+    """Tenue des engagements de paiement obtenus des débiteurs.
+
+    `taux_tenue` ne porte que sur les promesses déjà contrôlées : compter les
+    ATTENDUE au dénominateur ferait chuter le taux à chaque nouvel engagement,
+    alors qu'un engagement récent n'est pas un échec.
+    """
+
+    nb_attendues: int
+    nb_tenues: int
+    nb_partielles: int
+    nb_rompues: int
+    montant_attendu: Decimal
+    taux_tenue: int | None
+
+
+class PrevisionMois(BaseModel):
+    """Encaissement prévu pour un mois, en séparant ses deux natures.
+
+    `engage` vient de promesses datées et chiffrées : c'est du déclaratif du
+    débiteur. `pondere` vient des échéances à venir, minorées par le potentiel de
+    recouvrement issu de la segmentation. Les deux restent séparés parce qu'ils
+    n'ont pas la même valeur probante.
+    """
+
+    mois: str
+    engage: Decimal
+    pondere: Decimal
+    total: Decimal
+
+
+class LigneProductivite(BaseModel):
+    """Activité d'un agent. Les compteurs valent 0, jamais None : un agent sans
+    relance a bien travaillé zéro dossier, ce n'est pas une mesure manquante."""
+
+    agent: str
+    relances_emises: int
+    relances_avec_retour: int
+    promesses_obtenues: int
+    promesses_tenues: int
+    nb_paiements: int
+    montant_encaisse: Decimal
+
+
+class Alerte(BaseModel):
+    """Un signal calculé par règle déterministe, jamais par un modèle.
+
+    Une alerte doit être vérifiable : l'agent qui la reçoit doit pouvoir
+    retrouver le fait qui l'a déclenchée. `detail` porte ce fait.
+    """
+
+    code: str
+    severite: str
+    titre: str
+    detail: str
+    creance_id: int | None = None
+    reference: str | None = None
+    montant: Decimal | None = None
+
+
+class Recommandation(BaseModel):
+    """Une action a mener, rattachee au fait qui la motive.
+
+    `fait_declencheur` n'est pas decoratif : c'est ce qui rend la recommandation
+    verifiable. Sans lui, l'agent doit croire le modele sur parole.
+    """
+
+    titre: str
+    action: str
+    fait_declencheur: str
+    urgence: str
+
+
+class RecommandationsResponse(BaseModel):
+    recommandations: list[Recommandation]
+    modele: str
+
+
 class OrganisationStats(BaseModel):
     #: None sur la vue plateforme, qui agrege toutes les organisations.
     organisation_id: int | None
@@ -137,3 +230,8 @@ class OrganisationStats(BaseModel):
     echeances_a_venir: list[MontantParMois]
     top_debiteurs: list[LigneClassement]
     encaissements_par_utilisateur: list[LigneClassement]
+    cartographie_risques: list[CaseRisque]
+    promesses: StatsPromesses
+    previsions: list[PrevisionMois]
+    productivite: list[LigneProductivite]
+    alertes: list[Alerte]

@@ -38,6 +38,19 @@ class CreanceRepository:
     async def get_by_id(self, creance_id: int) -> Creance | None:
         return await self.db.get(Creance, creance_id)
 
+    async def soldes_par_id(self, creance_ids: list[int]) -> dict[int, Decimal]:
+        """Solde restant de chaque creance demandee.
+
+        Borne l'extraction des promesses : un engagement ne peut pas porter sur
+        plus que ce qui reste du.
+        """
+        if not creance_ids:
+            return {}
+        result = await self.db.execute(
+            select(Creance.id, Creance.montant_restant).where(Creance.id.in_(creance_ids))
+        )
+        return {row[0]: row[1] for row in result.all()}
+
     async def count(self, organisation_id: int | None) -> int:
         result = await self.db.execute(
             select(func.count()).select_from(Creance).where(self._portee(organisation_id))

@@ -6,7 +6,9 @@ from app.clients.dependencies import ClientServiceDep
 from app.creances.schemas import CreanceCreate, CreanceRead, CreanceUpdate
 from app.ia.dependencies import RedactionServiceDep
 from app.ia.schemas import MessageRelanceRequest, MessageRelanceResponse
+from app.organisations.dependencies import OrganisationServiceDep
 from app.relances.dependencies import RelanceServiceDep
+from app.users.dependencies import CurrentUserDep
 
 router = APIRouter(prefix="/creances", tags=["creances"])
 
@@ -53,16 +55,28 @@ async def rediger_message_relance(
     service: CreanceServiceDep,
     client_service: ClientServiceDep,
     relance_service: RelanceServiceDep,
+    organisation_service: OrganisationServiceDep,
     redaction: RedactionServiceDep,
+    current_user: CurrentUserDep,
 ) -> MessageRelanceResponse:
     """Redige un message de relance a partir du dossier.
 
     L'autorisation est portee par la creance : get_creance verifie deja que
     l'utilisateur a acces a ce dossier, donc l'endpoint n'a pas de garde propre.
+    current_user sert a signer le message, pas a autoriser l'appel.
     """
     creance = await service.get_creance(creance_id)
     client = await client_service.get_client(creance.client_id)
     relances = await relance_service.list_relances(creance_id=creance_id, limit=50)
+    # Charge explicitement : la relation User.organisation est lazy, y acceder
+    # depuis current_user leverait MissingGreenlet en session async.
+    organisation = (
+        await organisation_service.get_organisation(current_user.organisation_id)
+        if current_user.organisation_id is not None
+        else None
+    )
 
-    message, modele = await redaction.generer_message(creance, client, relances, data)
+    message, modele = await redaction.generer_message(
+        creance, client, relances, data, current_user, organisation
+    )
     return MessageRelanceResponse(message=message, modele=modele)

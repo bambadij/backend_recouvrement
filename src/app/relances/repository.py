@@ -1,6 +1,14 @@
+# Annotations differees : la methode `list` de ce repository masque le type
+# `list` dans le corps de la classe.
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+
 from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.creances.models import Creance, StatutCreance
 from app.relances.models import Relance, StatutRelance
 from app.relances.schemas import RelanceCreate, RelanceUpdate
 
@@ -20,8 +28,12 @@ class RelanceRepository:
         return Relance.organisation_id == organisation_id if organisation_id is not None else true()
 
 
-    async def create(self, data: RelanceCreate, organisation_id: int | None) -> Relance:
-        relance = Relance(**data.model_dump(), organisation_id=organisation_id)
+    async def create(
+        self, data: RelanceCreate, organisation_id: int | None, cree_par_nom: str | None = None
+    ) -> Relance:
+        relance = Relance(
+            **data.model_dump(), organisation_id=organisation_id, cree_par_nom=cree_par_nom
+        )
         self.db.add(relance)
         await self.db.commit()
         await self.db.refresh(relance)
@@ -66,6 +78,66 @@ class RelanceRepository:
     async def delete(self, relance: Relance) -> None:
         await self.db.delete(relance)
         await self.db.commit()
+
+    async def activite_par_agent(self, organisation_id: int | None) -> dict[str, tuple[int, int]]:
+        """Par agent : relances emises et relances ayant obtenu un retour.
+
+        Le retour (champ resultat renseigne) est le seul signal d'aboutissement
+        disponible sur une relance : il distingue l'agent qui obtient une reponse
+        de celui qui envoie dans le vide.
+        """
+        renseigne = Relance.resultat.isnot(None) & (Relance.resultat != "")
+        result = await self.db.execute(
+            select(Relance.cree_par_nom, func.count(), func.count().filter(renseigne))
+            .where(self._portee(organisation_id), Relance.cree_par_nom.isnot(None))
+            .group_by(Relance.cree_par_nom)
+        )
+        return {row[0]: (row[1], row[2]) for row in result.all()}
+
+    async def creances_sans_relance_depuis(
+        self, organisation_id: int | None, jours: int
+    ) -> list[tuple[int, str, Decimal, int, bool]]:
+        """Creances actives laissees sans relance depuis plus de `jours`.
+
+        Renvoie (id, reference, montant, jours, jamais_relancee).
+
+        Les deux cas ne se mesurent pas sur la meme horloge, et les confondre
+        ferait afficher un nombre invente :
+        - deja relance -> jours ecoules depuis la derniere relance ;
+        - jamais relance -> jours de RETARD depuis l'echeance. C'est le signal
+          operationnel : un dossier echu depuis 40 jours que personne n'a
+          jamais contacte est anormal, quelle que soit sa date d'entree en base.
+        """
+        aujourdhui = date.today()
+        derniere = (
+            select(Relance.creance_id, func.max(Relance.date_relance).label("derniere"))
+            .group_by(Relance.creance_id)
+            .subquery()
+        )
+        result = await self.db.execute(
+            select(
+                Creance.id,
+                Creance.reference,
+                Creance.montant_restant,
+                Creance.date_echeance,
+                derniere.c.derniere,
+            )
+            .outerjoin(derniere, derniere.c.creance_id == Creance.id)
+            .where(
+                Creance.organisation_id == organisation_id
+                if organisation_id is not None
+                else true(),
+                Creance.statut.in_((StatutCreance.EN_COURS, StatutCreance.EN_RETARD)),
+                Creance.montant_restant > 0,
+            )
+        )
+        lignes: list[tuple[int, str, Decimal, int, bool]] = []
+        for cid, ref, montant, echeance, derniere_date in result.all():
+            jamais = derniere_date is None
+            ecart = (aujourdhui - (derniere_date or echeance)).days
+            if ecart > jours:
+                lignes.append((cid, ref, Decimal(montant), ecart, jamais))
+        return lignes
 
     async def count(self, organisation_id: int | None) -> int:
         result = await self.db.execute(

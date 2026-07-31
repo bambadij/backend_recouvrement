@@ -17,8 +17,12 @@ from app.organisations import models as organisations_models  # noqa: F401
 from app.organisations.router import router as organisations_router
 from app.paiements import models as paiements_models  # noqa: F401
 from app.paiements.router import router as paiements_router
+from app.promesses import models as promesses_models  # noqa: F401
+from app.promesses.router import router as promesses_router
 from app.relances import models as relances_models  # noqa: F401
 from app.relances.router import router as relances_router
+from app.segmentation import models as segmentation_models  # noqa: F401
+from app.segmentation.router import router as segmentation_router
 from app.users import models as users_models  # noqa: F401
 from app.users.router import auth_router, router as users_router
 
@@ -55,6 +59,8 @@ app.include_router(clients_router)
 app.include_router(creances_router)
 app.include_router(paiements_router)
 app.include_router(relances_router)
+app.include_router(promesses_router)
+app.include_router(segmentation_router)
 app.include_router(imports_router)
 
 

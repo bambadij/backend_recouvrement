@@ -20,7 +20,8 @@ class RelanceService:
     async def create_relance(self, data: RelanceCreate) -> Relance:
         organisation_id = self._writable_organisation_id()
         await self.creance_service.get_creance(data.creance_id)  # 404 si creance d'une autre organisation
-        return await self.repository.create(data, organisation_id)
+        agent = f"{self.current_user.prenom} {self.current_user.nom}".strip() or None
+        return await self.repository.create(data, organisation_id, cree_par_nom=agent)
 
     async def get_relance(self, relance_id: int) -> Relance:
         relance = await self.repository.get_by_id(relance_id)

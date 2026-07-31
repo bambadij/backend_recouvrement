@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Query, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, status
 
 from app.core.exceptions import NotFoundException
+from app.ia.recommandations import RecommandationsIA, get_recommandations_ia
 from app.organisations.dependencies import OrganisationServiceDep, OrganisationStatsServiceDep
-from app.organisations.schemas import ApercuOrganisation, OrganisationCreate, RecouvrementCompare, OrganisationRead, OrganisationStats, OrganisationUpdate
+from app.organisations.schemas import ApercuOrganisation, OrganisationCreate, RecommandationsResponse, RecouvrementCompare, OrganisationRead, OrganisationStats, OrganisationUpdate
 from app.users.dependencies import CurrentSuperAdminDep, CurrentUserDep
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
@@ -46,6 +49,26 @@ async def get_my_organisation_stats(
     if current_user.organisation_id is None:
         raise NotFoundException("Le SUPER_ADMIN n'appartient a aucune organisation")
     return await service.get_stats(current_user.organisation_id, periode_jours)
+
+
+@router.post("/me/recommandations", response_model=RecommandationsResponse)
+async def recommandations_portefeuille(
+    current_user: CurrentUserDep,
+    service: OrganisationStatsServiceDep,
+    ia: Annotated[RecommandationsIA, Depends(get_recommandations_ia)],
+) -> RecommandationsResponse:
+    """Actions prioritaires deduites de l'etat du portefeuille.
+
+    Recalcule les statistiques a la demande plutot que de les recevoir du client :
+    des chiffres transmis par le navigateur pourraient etre alteres, et le modele
+    conseillerait alors sur un etat qui n'existe pas.
+    """
+    if current_user.organisation_id is None:
+        raise NotFoundException("Le SUPER_ADMIN n'appartient a aucune organisation")
+
+    stats = await service.get_stats(current_user.organisation_id)
+    recommandations, modele = await ia.generer(stats)
+    return RecommandationsResponse(recommandations=recommandations, modele=modele)
 
 
 @router.get("/apercu", response_model=list[ApercuOrganisation])

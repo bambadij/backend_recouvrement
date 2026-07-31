@@ -7,7 +7,9 @@ from app.core.config import settings
 from app.core.exceptions import BadRequestException
 from app.creances.models import Creance
 from app.ia.schemas import MessageRelanceRequest
+from app.organisations.models import Organisation
 from app.relances.models import Relance
+from app.users.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,9 @@ Regles absolues :
 - N'invente aucun fait : n'utilise que les montants, dates et echanges fournis.
 - Ne promets rien au nom du cabinet (pas de remise, pas de delai non demande).
 - Ne menace pas de poursuites sauf si le ton demande est « mise en demeure ».
-- Rends uniquement le corps du message, sans objet, sans en-tete, sans signature.
+- Rends uniquement le corps du message, sans objet et sans en-tete.
+- Termine par une formule de politesse suivie du nom de l'agent en charge, puis du
+  nom du cabinet s'il est fourni. Si l'agent n'est pas fourni, ne signe pas.
 - Sois bref : le destinataire doit comprendre en un coup d'oeil combien il doit et pour quand.
 """
 
@@ -53,11 +57,17 @@ class RedactionService:
         return self._client
 
     @staticmethod
-    def _contexte(creance: Creance, client: Client | None, relances: list[Relance]) -> str:
+    def _contexte(
+        creance: Creance,
+        client: Client | None,
+        relances: list[Relance],
+        agent: User | None,
+        organisation: Organisation | None,
+    ) -> str:
         """Le dossier mis a plat, en texte, pour le modele.
 
         Seuls des faits : ce qui n'est pas dans ce bloc ne doit pas apparaitre dans
-        le message rendu.
+        le message rendu — la signature comprise, d'ou l'agent et le cabinet ici.
         """
         nom = f"{client.prenom} {client.nom}".strip() if client else "le debiteur"
         lignes = [
@@ -70,6 +80,10 @@ class RedactionService:
         ]
         if client and client.entreprise:
             lignes.append(f"Entreprise : {client.entreprise}")
+        if agent:
+            lignes.append(f"Agent en charge, signataire du message : {agent.prenom} {agent.nom}".rstrip())
+        if organisation:
+            lignes.append(f"Cabinet expediteur : {organisation.nom}")
 
         if relances:
             lignes.append("")
@@ -90,11 +104,13 @@ class RedactionService:
         client: Client | None,
         relances: list[Relance],
         demande: MessageRelanceRequest,
+        agent: User | None = None,
+        organisation: Organisation | None = None,
     ) -> tuple[str, str]:
         """Renvoie (message, modele). Leve BadRequestException si la redaction echoue."""
         anthropic_client = self._obtenir_client()
 
-        consignes = [self._contexte(creance, client, relances), ""]
+        consignes = [self._contexte(creance, client, relances, agent, organisation), ""]
         if demande.ton:
             consignes.append(f"Registre demande : {demande.ton}.")
         if demande.instruction:

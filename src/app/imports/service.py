@@ -56,6 +56,20 @@ HEADER_MAP = {
     "status": "statut",
     "description": "description",
     "libelle": "description",
+    # Contexte du dossier — axes de segmentation. « financeur » n'est pas le
+    # débiteur : c'est qui doit effectivement payer (famille, bourse, entreprise).
+    "etablissement": "etablissement",
+    "ecole": "etablissement",
+    "structure": "etablissement",
+    "site": "etablissement",
+    "cycle": "cycle",
+    "niveau": "cycle",
+    "classe": "cycle",
+    "filiere": "cycle",
+    "financeur": "financeur",
+    "bailleur": "financeur",
+    "payeur": "financeur",
+    "sourcefinancement": "financeur",
     # Nom du débiteur en un seul champ (ex. société) + personne de contact
     "client": "nom",
     "raisonsociale": "nom",
@@ -95,6 +109,9 @@ TEMPLATE_HEADERS = [
     "date_echeance",
     "statut",
     "description",
+    "etablissement",
+    "cycle",
+    "financeur",
 ]
 
 
@@ -268,6 +285,11 @@ class ImportService:
                 "montant_initial": montant,
                 "date_echeance": echeance,
                 "statut": statut,
+                # Colonnes facultatives : absentes du modele standard, elles ne
+                # bloquent pas un fichier qui ne les porte pas.
+                "etablissement": str(row.get("etablissement") or "").strip() or None,
+                "cycle": str(row.get("cycle") or "").strip() or None,
+                "financeur": str(row.get("financeur") or "").strip() or None,
             },
             "montant_regle": montant_regle,
         }

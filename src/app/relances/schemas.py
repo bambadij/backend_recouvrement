@@ -32,4 +32,5 @@ class RelanceRead(BaseModel):
     statut: StatutRelance
     contenu: str | None
     resultat: str | None
+    cree_par_nom: str | None
     created_at: datetime

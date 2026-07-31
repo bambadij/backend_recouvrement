@@ -1,0 +1,192 @@
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy import func, select, true
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.clients.models import Client
+from app.creances.models import Creance, StatutCreance
+from app.paiements.models import Paiement
+from app.promesses.models import Promesse, StatutPromesse
+from app.relances.models import Relance, StatutRelance
+from app.segmentation.models import Segmentation
+from app.segmentation.schemas import FaitsDossier
+
+#: Un dossier soldee ou annulee n'a plus rien a recouvrer : le classer serait du
+#: bruit dans la file de travail, et de l'appel de modele paye pour rien.
+STATUTS_ACTIFS = (StatutCreance.EN_COURS, StatutCreance.EN_RETARD, StatutCreance.LITIGE)
+
+
+def _jours_depuis(reference: date | None, aujourdhui: date) -> int | None:
+    return (aujourdhui - reference).days if reference is not None else None
+
+
+class SegmentationRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    @staticmethod
+    def _portee(organisation_id: int | None):
+        return Creance.organisation_id == organisation_id if organisation_id is not None else true()
+
+    async def charger_faits(
+        self,
+        organisation_id: int | None,
+        limite: int,
+        inclure_deja_classes: bool = True,
+    ) -> list[FaitsDossier]:
+        """Rassemble les faits de chaque dossier actif.
+
+        Quatre requetes agregees plutot qu'une par dossier : sur un parc de plusieurs
+        centaines de creances, le N+1 couterait plus cher que l'appel de modele qui suit.
+        """
+        aujourdhui = date.today()
+
+        query = (
+            select(Creance, Client)
+            .join(Client, Creance.client_id == Client.id)
+            .where(self._portee(organisation_id), Creance.statut.in_(STATUTS_ACTIFS))
+        )
+        if not inclure_deja_classes:
+            # Ne reclasse pas ce qui l'a deja ete : la passe quotidienne ne doit
+            # payer que les dossiers nouveaux ou modifies.
+            query = query.outerjoin(Segmentation, Segmentation.creance_id == Creance.id).where(
+                Segmentation.id.is_(None)
+            )
+        query = query.order_by(Creance.montant_restant.desc()).limit(limite)
+
+        lignes = (await self.db.execute(query)).all()
+        if not lignes:
+            return []
+
+        creance_ids = [creance.id for creance, _ in lignes]
+        relances = await self._agregats_relances(creance_ids)
+        paiements = await self._agregats_paiements(creance_ids)
+        promesses = await self._agregats_promesses(creance_ids)
+
+        faits: list[FaitsDossier] = []
+        for creance, client in lignes:
+            nb_relances, nb_echouees, derniere_relance = relances.get(creance.id, (0, 0, None))
+            nb_paiements, dernier_paiement = paiements.get(creance.id, (0, None))
+            nb_promesses, tenues, rompues = promesses.get(creance.id, (0, 0, 0))
+
+            initial = creance.montant_initial or 0
+            regle = initial - creance.montant_restant
+            taux = int(regle / initial * 100) if initial else 0
+
+            faits.append(
+                FaitsDossier(
+                    creance_id=creance.id,
+                    reference=creance.reference,
+                    debiteur=f"{client.prenom} {client.nom}".strip(),
+                    entreprise=client.entreprise,
+                    etablissement=creance.etablissement,
+                    cycle=creance.cycle,
+                    financeur=creance.financeur,
+                    montant_initial=creance.montant_initial,
+                    montant_restant=creance.montant_restant,
+                    taux_regle=max(0, min(100, taux)),
+                    anciennete_jours=(aujourdhui - creance.date_echeance).days,
+                    statut=creance.statut.value,
+                    nb_relances=nb_relances,
+                    nb_relances_echouees=nb_echouees,
+                    jours_depuis_derniere_relance=_jours_depuis(derniere_relance, aujourdhui),
+                    nb_paiements=nb_paiements,
+                    jours_depuis_dernier_paiement=_jours_depuis(dernier_paiement, aujourdhui),
+                    nb_promesses=nb_promesses,
+                    nb_promesses_tenues=tenues,
+                    nb_promesses_rompues=rompues,
+                )
+            )
+        return faits
+
+    async def _agregats_relances(self, creance_ids: list[int]) -> dict[int, tuple[int, int, date | None]]:
+        result = await self.db.execute(
+            select(
+                Relance.creance_id,
+                func.count(),
+                func.count().filter(Relance.statut == StatutRelance.ECHOUEE),
+                func.max(Relance.date_relance),
+            )
+            .where(Relance.creance_id.in_(creance_ids))
+            .group_by(Relance.creance_id)
+        )
+        return {row[0]: (row[1], row[2], row[3]) for row in result.all()}
+
+    async def _agregats_paiements(self, creance_ids: list[int]) -> dict[int, tuple[int, date | None]]:
+        result = await self.db.execute(
+            select(Paiement.creance_id, func.count(), func.max(Paiement.date_paiement))
+            .where(Paiement.creance_id.in_(creance_ids))
+            .group_by(Paiement.creance_id)
+        )
+        return {row[0]: (row[1], row[2]) for row in result.all()}
+
+    async def _agregats_promesses(self, creance_ids: list[int]) -> dict[int, tuple[int, int, int]]:
+        result = await self.db.execute(
+            select(
+                Promesse.creance_id,
+                func.count(),
+                func.count().filter(Promesse.statut == StatutPromesse.TENUE),
+                func.count().filter(Promesse.statut == StatutPromesse.ROMPUE),
+            )
+            .where(Promesse.creance_id.in_(creance_ids))
+            .group_by(Promesse.creance_id)
+        )
+        return {row[0]: (row[1], row[2], row[3]) for row in result.all()}
+
+    async def cartographie(
+        self, organisation_id: int | None
+    ) -> list[tuple[str, str, int, Decimal]]:
+        """Encours ventilé par case (segment de risque x potentiel de recouvrement).
+
+        C'est la vue qui donne son sens aux deux axes : le risque seul dit où ça
+        va mal, le croisement dit où l'effort paie. Les cases vides ne sont pas
+        renvoyées — le front reconstruit la grille complète.
+        """
+        result = await self.db.execute(
+            select(
+                Segmentation.segment,
+                Segmentation.potentiel,
+                func.count(),
+                func.coalesce(func.sum(Creance.montant_restant), 0),
+            )
+            .join(Creance, Segmentation.creance_id == Creance.id)
+            .where(self._portee(organisation_id))
+            .group_by(Segmentation.segment, Segmentation.potentiel)
+        )
+        return [(r[0].value, r[1].value, r[2], Decimal(r[3])) for r in result.all()]
+
+    async def poids_potentiel_par_creance(self, organisation_id: int | None) -> dict[int, str]:
+        """Potentiel de recouvrement de chaque créance classée, pour la prévision."""
+        result = await self.db.execute(
+            select(Segmentation.creance_id, Segmentation.potentiel).where(
+                self._portee(organisation_id)
+            )
+        )
+        return {row[0]: row[1].value for row in result.all()}
+
+    async def get_by_creance(self, creance_id: int) -> Segmentation | None:
+        result = await self.db.execute(select(Segmentation).where(Segmentation.creance_id == creance_id))
+        return result.scalar_one_or_none()
+
+    async def enregistrer(self, segmentations: list[Segmentation]) -> None:
+        """Remplace la segmentation courante de chaque creance concernee."""
+        for segmentation in segmentations:
+            existante = await self.get_by_creance(segmentation.creance_id)
+            if existante is not None:
+                await self.db.delete(existante)
+        await self.db.flush()
+        self.db.add_all(segmentations)
+        await self.db.commit()
+
+    async def list_dossiers_segmentes(
+        self, organisation_id: int | None, limit: int = 200
+    ) -> list[tuple[Segmentation, Creance, Client]]:
+        query = (
+            select(Segmentation, Creance, Client)
+            .join(Creance, Segmentation.creance_id == Creance.id)
+            .join(Client, Creance.client_id == Client.id)
+            .where(self._portee(organisation_id))
+            .limit(limit)
+        )
+        return [(s, c, cl) for s, c, cl in (await self.db.execute(query)).all()]

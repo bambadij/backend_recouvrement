@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy.dialects.postgresql import INTERVAL
@@ -49,6 +50,19 @@ class PaiementRepository:
         query = query.order_by(Paiement.id).offset(skip).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())
+
+    async def total_encaisse_depuis(self, creance_id: int, depuis: date) -> Decimal:
+        """Somme encaissee sur une creance a partir d'une date incluse.
+
+        Sert au controle des promesses : ce qui est tombe apres l'engagement dit si
+        celui-ci a ete tenu. La date de paiement fait foi, pas la date de saisie.
+        """
+        result = await self.db.execute(
+            select(func.coalesce(func.sum(Paiement.montant), 0)).where(
+                Paiement.creance_id == creance_id, Paiement.date_paiement >= depuis
+            )
+        )
+        return Decimal(result.scalar_one())
 
     async def recouvrement_par_organisation_et_mois(
         self, nb_mois: int
