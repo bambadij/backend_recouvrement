@@ -10,9 +10,11 @@ if TYPE_CHECKING:
     from app.creances.models import Creance
 
 
-class Client(Base):
-    __tablename__ = "clients"
-    __table_args__ = (UniqueConstraint("organisation_id", "email", name="uq_clients_organisation_email"),)
+class Debiteur(Base):
+    """Celui qui doit de l'argent — personne physique ou morale."""
+
+    __tablename__ = "debiteurs"
+    __table_args__ = (UniqueConstraint("organisation_id", "email", name="uq_debiteurs_organisation_email"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
@@ -31,4 +33,4 @@ class Client(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    creances: Mapped[list["Creance"]] = relationship(back_populates="client", cascade="all, delete-orphan")
+    creances: Mapped[list["Creance"]] = relationship(back_populates="debiteur", cascade="all, delete-orphan")

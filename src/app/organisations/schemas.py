@@ -30,7 +30,7 @@ class OrganisationRead(OrganisationBase):
 
 class OrganisationStats(BaseModel):
     organisation_id: int
-    nb_clients: int
+    nb_debiteurs: int
     nb_creances: int
     creances_par_statut: dict[str, int]
     montant_total_initial: Decimal

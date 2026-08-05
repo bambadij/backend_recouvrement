@@ -37,15 +37,15 @@ class CreanceRepository:
         self,
         skip: int = 0,
         limit: int = 100,
-        client_id: int | None = None,
+        debiteur_id: int | None = None,
         statut: StatutCreance | None = None,
         organisation_id: int | None = None,
     ) -> list[Creance]:
         query = select(Creance)
         if organisation_id is not None:
             query = query.where(Creance.organisation_id == organisation_id)
-        if client_id is not None:
-            query = query.where(Creance.client_id == client_id)
+        if debiteur_id is not None:
+            query = query.where(Creance.debiteur_id == debiteur_id)
         if statut is not None:
             query = query.where(Creance.statut == statut)
         query = query.order_by(Creance.id).offset(skip).limit(limit)

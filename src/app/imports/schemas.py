@@ -14,7 +14,7 @@ class ImportPreview(BaseModel):
 
 
 class ImportResult(BaseModel):
-    clients_crees: int
-    clients_reutilises: int
+    debiteurs_crees: int
+    debiteurs_reutilises: int
     creances_creees: int
     lignes_rejetees: list[ImportRowError]
