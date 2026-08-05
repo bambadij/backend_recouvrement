@@ -3,11 +3,11 @@ import unicodedata
 from datetime import date
 from decimal import Decimal
 
-from app.clients.service import ClientService
 from app.core.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
 from app.creances.models import Creance, StatutCreance
 from app.creances.repository import CreanceRepository
 from app.creances.schemas import CreanceCreate, CreanceUpdate
+from app.debiteurs.service import DebiteurService
 from app.organisations.repository import OrganisationRepository
 from app.users.models import User
 
@@ -16,12 +16,12 @@ class CreanceService:
     def __init__(
         self,
         repository: CreanceRepository,
-        client_service: ClientService,
+        debiteur_service: DebiteurService,
         organisation_repository: OrganisationRepository,
         current_user: User,
     ) -> None:
         self.repository = repository
-        self.client_service = client_service
+        self.debiteur_service = debiteur_service
         self.organisation_repository = organisation_repository
         self.current_user = current_user
 
@@ -32,7 +32,7 @@ class CreanceService:
 
     async def create_creance(self, data: CreanceCreate) -> Creance:
         organisation_id = self._writable_organisation_id()
-        await self.client_service.get_client(data.client_id)  # 404 si client d'une autre organisation
+        await self.debiteur_service.get_debiteur(data.debiteur_id)  # 404 si debiteur d'une autre organisation
         if data.reference:
             # Reference fournie : on verifie juste l'unicite.
             if await self.repository.get_by_reference(data.reference, organisation_id):
@@ -79,12 +79,12 @@ class CreanceService:
         return creance
 
     async def list_creances(
-        self, skip: int = 0, limit: int = 100, client_id: int | None = None, statut: StatutCreance | None = None
+        self, skip: int = 0, limit: int = 100, debiteur_id: int | None = None, statut: StatutCreance | None = None
     ) -> list[Creance]:
         return await self.repository.list(
             skip=skip,
             limit=limit,
-            client_id=client_id,
+            debiteur_id=debiteur_id,
             statut=statut,
             organisation_id=self.current_user.organisation_id,
         )
@@ -92,6 +92,13 @@ class CreanceService:
     async def update_creance(self, creance_id: int, data: CreanceUpdate) -> Creance:
         creance = await self.get_creance(creance_id)
         self._writable_organisation_id()
+        # Meme coherence que sur CreanceCreate, mais evaluee sur les valeurs
+        # resultantes : un PATCH partiel ne porte qu'une des deux dates.
+        modifies = data.model_dump(exclude_unset=True)
+        date_facture = modifies.get("date_facture", creance.date_facture)
+        date_echeance = modifies.get("date_echeance", creance.date_echeance)
+        if date_facture is not None and date_facture > date_echeance:
+            raise BadRequestException("La date de facture ne peut pas etre posterieure a la date d'echeance")
         return await self.repository.update(creance, data)
 
     async def delete_creance(self, creance_id: int) -> None:

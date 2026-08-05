@@ -7,12 +7,12 @@ from decimal import Decimal, InvalidOperation
 
 from openpyxl import Workbook, load_workbook
 
-from app.clients.repository import ClientRepository
-from app.clients.schemas import ClientCreate
 from app.core.exceptions import BadRequestException, ForbiddenException
 from app.creances.models import StatutCreance
 from app.creances.schemas import CreanceCreate
 from app.creances.service import CreanceService
+from app.debiteurs.repository import DebiteurRepository
+from app.debiteurs.schemas import DebiteurCreate
 from app.imports.schemas import ImportPreview, ImportResult, ImportRowError
 from app.users.models import User
 
@@ -33,12 +33,14 @@ HEADER_MAP = {
     "ville": "ville",
     "codepostal": "code_postal",
     "cp": "code_postal",
+    # Reference interne du dossier, a distinguer du numero de la facture d'origine.
     "reference": "reference",
     "ref": "reference",
-    "numfacture": "reference",
-    "numerofacture": "reference",
-    "nfacture": "reference",
-    "facture": "reference",
+    "numfacture": "numero_facture",
+    "numerofacture": "numero_facture",
+    "nfacture": "numero_facture",
+    "numfact": "numero_facture",
+    "facture": "numero_facture",
     "montant": "montant",
     "montantinitial": "montant",
     "montantttc": "montant",
@@ -50,13 +52,21 @@ HEADER_MAP = {
     "solde": "montant_restant",
     "resteapayer": "montant_restant",
     "montantrestant": "montant_restant",
+    "datefacture": "date_facture",
+    "datefact": "date_facture",
+    "dateemission": "date_facture",
+    "emission": "date_facture",
     "echeance": "echeance",
     "dateecheance": "echeance",
     "statut": "statut",
     "status": "statut",
     "description": "description",
     "libelle": "description",
-    # Nom du débiteur en un seul champ (ex. société) + personne de contact
+    # Nom du débiteur en un seul champ (ex. société) + personne de contact.
+    # « client » et « nomclient » restent acceptés : les fichiers historiques
+    # des organisations utilisent encore ce libellé pour désigner le débiteur.
+    "debiteur": "nom",
+    "nomdebiteur": "nom",
     "client": "nom",
     "raisonsociale": "nom",
     "nomclient": "nom",
@@ -86,7 +96,8 @@ def _norm_statut(value: object) -> str:
 # Colonnes du modèle Excel téléchargeable (format « factures »)
 TEMPLATE_HEADERS = [
     "num_facture",
-    "client",
+    "date_facture",
+    "debiteur",
     "contact",
     "telephone",
     "email",
@@ -111,7 +122,7 @@ def _parse_montant(value: object) -> Decimal | None:
     if isinstance(value, (int, float)):
         montant = Decimal(str(value))
     else:
-        cleaned = re.sub(r"[\s ]", "", str(value)).replace(",", ".")
+        cleaned = re.sub(r"[\s ]", "", str(value)).replace(",", ".")
         montant = Decimal(cleaned)  # peut lever InvalidOperation
     if montant <= 0:
         raise InvalidOperation("montant non positif")
@@ -136,9 +147,9 @@ def _parse_date(value: object) -> date | None:
 
 class ImportService:
     def __init__(
-        self, client_repository: ClientRepository, creance_service: CreanceService, current_user: User
+        self, debiteur_repository: DebiteurRepository, creance_service: CreanceService, current_user: User
     ) -> None:
-        self.client_repository = client_repository
+        self.debiteur_repository = debiteur_repository
         self.creance_service = creance_service
         self.current_user = current_user
 
@@ -205,7 +216,7 @@ class ImportService:
     def _validate_row(self, row: dict) -> tuple[dict | None, str | None]:
         nom = str(row.get("nom") or "").strip()
         if not nom:
-            return None, "Nom du client obligatoire"
+            return None, "Nom du débiteur obligatoire"
         prenom = str(row.get("prenom") or "").strip() or "-"
 
         try:
@@ -221,6 +232,15 @@ class ImportService:
             return None, f"Échéance invalide : {row.get('echeance')!r}"
         if echeance is None:
             return None, "Échéance obligatoire"
+
+        # Date de facture : facultative (les reprises de stock ne l'ont pas toujours),
+        # mais si elle est fournie elle doit précéder l'échéance.
+        try:
+            date_facture = _parse_date(row.get("date_facture"))
+        except ValueError:
+            return None, f"Date de facture invalide : {row.get('date_facture')!r}"
+        if date_facture is not None and date_facture > echeance:
+            return None, f"Date de facture ({date_facture}) postérieure à l'échéance ({echeance})"
 
         # Statut : accepte les libellés FR ("En cours") comme les codes ("EN_COURS").
         statut_input = str(row.get("statut") or "").strip()
@@ -247,11 +267,15 @@ class ImportService:
             montant_regle = Decimal("0")
         montant_regle = max(Decimal("0"), min(montant_regle, montant))
 
-        telephone = re.sub(r"[\s ]", "", str(row.get("telephone") or "").strip()) or None
-        reference = str(row.get("reference") or "").strip() or None
+        telephone = re.sub(r"[\s ]", "", str(row.get("telephone") or "").strip()) or None
+        numero_facture = str(row.get("numero_facture") or "").strip() or None
+        # À défaut de colonne « référence » dédiée, le numéro de facture sert de
+        # référence interne : c'est ce qui fait échouer un ré-import du même fichier
+        # sur la contrainte d'unicité, plutôt que de créer des doublons.
+        reference = str(row.get("reference") or "").strip() or numero_facture
 
         record = {
-            "client": ClientCreate(
+            "debiteur": DebiteurCreate(
                 nom=nom,
                 prenom=prenom,
                 email=str(row.get("email") or "").strip() or None,
@@ -264,8 +288,10 @@ class ImportService:
             "telephone": telephone,
             "creance": {
                 "reference": reference,
+                "numero_facture": numero_facture,
                 "description": str(row.get("description") or "").strip() or None,
                 "montant_initial": montant,
+                "date_facture": date_facture,
                 "date_echeance": echeance,
                 "statut": statut,
             },
@@ -298,8 +324,8 @@ class ImportService:
         rows = self._parse_file(filename, content)
         organisation_id = self._organisation_id()
 
-        clients_crees = 0
-        clients_reutilises = 0
+        debiteurs_crees = 0
+        debiteurs_reutilises = 0
         creances_creees = 0
         rejets: list[ImportRowError] = []
         cache_tel: dict[str, int] = {}
@@ -311,27 +337,27 @@ class ImportService:
                 rejets.append(ImportRowError(ligne=ligne, message=err or "ligne invalide"))
                 continue
             try:
-                client_id = None
+                debiteur_id = None
                 telephone = record["telephone"]
                 if telephone:
                     if telephone in cache_tel:
-                        client_id = cache_tel[telephone]
+                        debiteur_id = cache_tel[telephone]
                     else:
-                        existant = await self.client_repository.get_by_telephone(telephone, organisation_id)
+                        existant = await self.debiteur_repository.get_by_telephone(telephone, organisation_id)
                         if existant is not None:
-                            client_id = existant.id
-                            clients_reutilises += 1
-                            cache_tel[telephone] = client_id
+                            debiteur_id = existant.id
+                            debiteurs_reutilises += 1
+                            cache_tel[telephone] = debiteur_id
 
-                if client_id is None:
-                    client = await self.client_repository.create(record["client"], organisation_id)
-                    client_id = client.id
-                    clients_crees += 1
+                if debiteur_id is None:
+                    debiteur = await self.debiteur_repository.create(record["debiteur"], organisation_id)
+                    debiteur_id = debiteur.id
+                    debiteurs_crees += 1
                     if telephone:
-                        cache_tel[telephone] = client_id
+                        cache_tel[telephone] = debiteur_id
 
                 creance = await self.creance_service.create_creance(
-                    CreanceCreate(client_id=client_id, **record["creance"])
+                    CreanceCreate(debiteur_id=debiteur_id, **record["creance"])
                 )
                 creances_creees += 1
                 # Reflète le montant déjà réglé (fichier source) : le restant passe au solde,
@@ -343,8 +369,8 @@ class ImportService:
                 rejets.append(ImportRowError(ligne=ligne, message=str(exc)[:200]))
 
         return ImportResult(
-            clients_crees=clients_crees,
-            clients_reutilises=clients_reutilises,
+            debiteurs_crees=debiteurs_crees,
+            debiteurs_reutilises=debiteurs_reutilises,
             creances_creees=creances_creees,
             lignes_rejetees=rejets,
         )
@@ -360,6 +386,7 @@ class ImportService:
         ws.append(
             [
                 "FAC-2026-0001",
+                "2026-07-31",
                 "Atlantique Négoce SA",
                 "M. Diallo",
                 "+221770000001",
@@ -374,6 +401,7 @@ class ImportService:
         ws.append(
             [
                 "FAC-2026-0002",
+                "2026-08-31",
                 "Atlantique Négoce SA",
                 "M. Diallo",
                 "+221770000001",
