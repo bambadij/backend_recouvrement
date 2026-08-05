@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 
-class ClientBase(BaseModel):
+class DebiteurBase(BaseModel):
     nom: str
     prenom: str
     email: EmailStr | None = None
@@ -15,11 +15,11 @@ class ClientBase(BaseModel):
     notes: str | None = None
 
 
-class ClientCreate(ClientBase):
+class DebiteurCreate(DebiteurBase):
     pass
 
 
-class ClientUpdate(BaseModel):
+class DebiteurUpdate(BaseModel):
     nom: str | None = None
     prenom: str | None = None
     email: EmailStr | None = None
@@ -31,7 +31,7 @@ class ClientUpdate(BaseModel):
     notes: str | None = None
 
 
-class ClientRead(ClientBase):
+class DebiteurRead(DebiteurBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int

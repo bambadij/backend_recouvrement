@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.models import Client
+from app.debiteurs.models import Debiteur
 from app.creances.models import Creance, StatutCreance
 from app.paiements.models import Paiement
 from app.promesses.models import Promesse, StatutPromesse
@@ -43,8 +43,8 @@ class SegmentationRepository:
         aujourdhui = date.today()
 
         query = (
-            select(Creance, Client)
-            .join(Client, Creance.client_id == Client.id)
+            select(Creance, Debiteur)
+            .join(Debiteur, Creance.debiteur_id == Debiteur.id)
             .where(self._portee(organisation_id), Creance.statut.in_(STATUTS_ACTIFS))
         )
         if not inclure_deja_classes:
@@ -65,7 +65,7 @@ class SegmentationRepository:
         promesses = await self._agregats_promesses(creance_ids)
 
         faits: list[FaitsDossier] = []
-        for creance, client in lignes:
+        for creance, debiteur in lignes:
             nb_relances, nb_echouees, derniere_relance = relances.get(creance.id, (0, 0, None))
             nb_paiements, dernier_paiement = paiements.get(creance.id, (0, None))
             nb_promesses, tenues, rompues = promesses.get(creance.id, (0, 0, 0))
@@ -78,8 +78,8 @@ class SegmentationRepository:
                 FaitsDossier(
                     creance_id=creance.id,
                     reference=creance.reference,
-                    debiteur=f"{client.prenom} {client.nom}".strip(),
-                    entreprise=client.entreprise,
+                    debiteur=f"{debiteur.prenom} {debiteur.nom}".strip(),
+                    entreprise=debiteur.entreprise,
                     etablissement=creance.etablissement,
                     cycle=creance.cycle,
                     financeur=creance.financeur,
@@ -181,11 +181,11 @@ class SegmentationRepository:
 
     async def list_dossiers_segmentes(
         self, organisation_id: int | None, limit: int = 200
-    ) -> list[tuple[Segmentation, Creance, Client]]:
+    ) -> list[tuple[Segmentation, Creance, Debiteur]]:
         query = (
-            select(Segmentation, Creance, Client)
+            select(Segmentation, Creance, Debiteur)
             .join(Creance, Segmentation.creance_id == Creance.id)
-            .join(Client, Creance.client_id == Client.id)
+            .join(Debiteur, Creance.debiteur_id == Debiteur.id)
             .where(self._portee(organisation_id))
             .limit(limit)
         )

@@ -4,14 +4,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.clients import models as clients_models  # noqa: F401
-from app.clients.router import router as clients_router
 from app.core.bootstrap import bootstrap_super_admin
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.exceptions import AppException, app_exception_handler
 from app.creances import models as creances_models  # noqa: F401
 from app.creances.router import router as creances_router
+from app.debiteurs import models as debiteurs_models  # noqa: F401
+from app.debiteurs.router import router as debiteurs_router
 from app.imports.router import router as imports_router
 from app.organisations import models as organisations_models  # noqa: F401
 from app.organisations.router import router as organisations_router
@@ -55,7 +55,7 @@ app.add_exception_handler(AppException, app_exception_handler)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(organisations_router)
-app.include_router(clients_router)
+app.include_router(debiteurs_router)
 app.include_router(creances_router)
 app.include_router(paiements_router)
 app.include_router(relances_router)

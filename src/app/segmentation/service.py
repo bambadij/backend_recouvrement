@@ -96,7 +96,7 @@ class SegmentationService:
             DossierSegmente(
                 creance_id=creance.id,
                 reference=creance.reference,
-                debiteur=f"{client.prenom} {client.nom}".strip(),
+                debiteur=f"{debiteur.prenom} {debiteur.nom}".strip(),
                 etablissement=creance.etablissement,
                 cycle=creance.cycle,
                 financeur=creance.financeur,
@@ -109,7 +109,7 @@ class SegmentationService:
                 rang=0,
                 calcule_le=segmentation.calcule_le,
             )
-            for segmentation, creance, client in lignes
+            for segmentation, creance, debiteur in lignes
         ]
 
         dossiers.sort(key=lambda d: (_RANG_POTENTIEL[d.potentiel], -d.montant_restant))

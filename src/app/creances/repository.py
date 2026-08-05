@@ -7,7 +7,7 @@ from sqlalchemy import String, case, cast, func, literal, select, true
 from sqlalchemy.dialects.postgresql import INTERVAL
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.models import Client
+from app.debiteurs.models import Debiteur
 from app.creances.models import Creance, StatutCreance
 from app.paiements.models import Paiement
 from app.creances.schemas import CreanceCreate, CreanceUpdate
@@ -67,15 +67,15 @@ class CreanceRepository:
         self,
         skip: int = 0,
         limit: int = 100,
-        client_id: int | None = None,
+        debiteur_id: int | None = None,
         statut: StatutCreance | None = None,
         organisation_id: int | None = None,
     ) -> list[Creance]:
         query = select(Creance)
         if organisation_id is not None:
             query = query.where(self._portee(organisation_id))
-        if client_id is not None:
-            query = query.where(Creance.client_id == client_id)
+        if debiteur_id is not None:
+            query = query.where(Creance.debiteur_id == debiteur_id)
         if statut is not None:
             query = query.where(self._statut_effectif() == statut.value)
         query = query.order_by(Creance.id).offset(skip).limit(limit)
@@ -200,7 +200,7 @@ class CreanceRepository:
             .where(
                 self._portee(organisation_id),
                 Creance.statut != StatutCreance.ANNULEE,
-                Creance.date_creation <= date_ref,
+                Creance.date_saisie <= date_ref,
                 reste > 0,
             )
             .group_by(tranche)
@@ -270,11 +270,11 @@ class CreanceRepository:
         Trié par restant dû et non par montant initial : ce qui compte pour arbitrer
         l'effort de recouvrement, c'est ce qu'il reste à aller chercher.
         """
-        nom = func.concat(Client.prenom, " ", Client.nom)
+        nom = func.concat(Debiteur.prenom, " ", Debiteur.nom)
         result = await self.db.execute(
             select(nom.label("nom"), func.sum(Creance.montant_restant), func.count())
             .select_from(Creance)
-            .join(Client, Client.id == Creance.client_id)
+            .join(Debiteur, Debiteur.id == Creance.debiteur_id)
             .where(
                 self._portee(organisation_id),
                 Creance.statut.notin_([StatutCreance.SOLDEE, StatutCreance.ANNULEE]),
@@ -307,7 +307,7 @@ class CreanceRepository:
             select(func.coalesce(func.sum(Creance.montant_initial), 0)).where(
                 self._portee(organisation_id),
                 vivante,
-                Creance.date_creation >= func.current_date() - periode_jours,
+                Creance.date_saisie >= func.current_date() - periode_jours,
             )
         )
         return Decimal(encours.scalar_one()), Decimal(flux.scalar_one())

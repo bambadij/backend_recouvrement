@@ -2,8 +2,8 @@ from fastapi import APIRouter, Query, status
 
 from app.creances.dependencies import CreanceServiceDep
 from app.creances.models import StatutCreance
-from app.clients.dependencies import ClientServiceDep
 from app.creances.schemas import CreanceCreate, CreanceRead, CreanceUpdate
+from app.debiteurs.dependencies import DebiteurServiceDep
 from app.ia.dependencies import RedactionServiceDep
 from app.ia.schemas import MessageRelanceRequest, MessageRelanceResponse
 from app.organisations.dependencies import OrganisationServiceDep
@@ -24,10 +24,10 @@ async def list_creances(
     service: CreanceServiceDep,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    client_id: int | None = None,
+    debiteur_id: int | None = None,
     statut: StatutCreance | None = None,
 ) -> list[CreanceRead]:
-    creances = await service.list_creances(skip=skip, limit=limit, client_id=client_id, statut=statut)
+    creances = await service.list_creances(skip=skip, limit=limit, debiteur_id=debiteur_id, statut=statut)
     return [CreanceRead.model_validate(c) for c in creances]
 
 
@@ -53,7 +53,7 @@ async def rediger_message_relance(
     creance_id: int,
     data: MessageRelanceRequest,
     service: CreanceServiceDep,
-    client_service: ClientServiceDep,
+    debiteur_service: DebiteurServiceDep,
     relance_service: RelanceServiceDep,
     organisation_service: OrganisationServiceDep,
     redaction: RedactionServiceDep,
@@ -66,7 +66,7 @@ async def rediger_message_relance(
     current_user sert a signer le message, pas a autoriser l'appel.
     """
     creance = await service.get_creance(creance_id)
-    client = await client_service.get_client(creance.client_id)
+    debiteur = await debiteur_service.get_debiteur(creance.debiteur_id)
     relances = await relance_service.list_relances(creance_id=creance_id, limit=50)
     # Charge explicitement : la relation User.organisation est lazy, y acceder
     # depuis current_user leverait MissingGreenlet en session async.
@@ -77,6 +77,6 @@ async def rediger_message_relance(
     )
 
     message, modele = await redaction.generer_message(
-        creance, client, relances, data, current_user, organisation
+        creance, debiteur, relances, data, current_user, organisation
     )
     return MessageRelanceResponse(message=message, modele=modele)

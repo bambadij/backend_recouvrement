@@ -4,16 +4,16 @@ ANALYSE_DOSSIER_PROMPT = """
 Tu es un assistant specialise en recouvrement de creances.
 Analyse le dossier suivant et donne une evaluation du risque de non-paiement.
 
-Client : {client}
+Debiteur : {debiteur}
 Creance : {creance}
 Historique de paiements : {paiements}
 Historique de relances : {relances}
 """
 
 GENERATION_RELANCE_PROMPT = """
-Redige un message de relance {type_relance} pour le client suivant, sur un ton {ton}.
+Redige un message de relance {type_relance} pour le debiteur suivant, sur un ton {ton}.
 
-Client : {client}
+Debiteur : {debiteur}
 Creance : {creance}
 Montant restant du : {montant_restant}
 Nombre de relances precedentes : {nombre_relances}

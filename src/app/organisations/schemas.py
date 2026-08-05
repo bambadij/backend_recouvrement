@@ -215,7 +215,7 @@ class RecommandationsResponse(BaseModel):
 class OrganisationStats(BaseModel):
     #: None sur la vue plateforme, qui agrege toutes les organisations.
     organisation_id: int | None
-    nb_clients: int
+    nb_debiteurs: int
     nb_creances: int
     creances_par_statut: dict[str, int]
     montant_total_initial: Decimal

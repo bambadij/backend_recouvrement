@@ -3,9 +3,9 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.repository import ClientRepository
 from app.core.database import get_db
 from app.creances.repository import CreanceRepository
+from app.debiteurs.repository import DebiteurRepository
 from app.organisations.repository import OrganisationRepository
 from app.organisations.service import OrganisationService
 from app.organisations.stats import OrganisationStatsService
@@ -26,7 +26,7 @@ OrganisationServiceDep = Annotated[OrganisationService, Depends(get_organisation
 def get_organisation_stats_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganisationStatsService:
     return OrganisationStatsService(
         OrganisationRepository(db),
-        ClientRepository(db),
+        DebiteurRepository(db),
         CreanceRepository(db),
         PaiementRepository(db),
         RelanceRepository(db),

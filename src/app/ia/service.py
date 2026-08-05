@@ -2,7 +2,7 @@ import logging
 
 import anthropic
 
-from app.clients.models import Client
+from app.debiteurs.models import Debiteur
 from app.core.config import settings
 from app.core.exceptions import BadRequestException
 from app.creances.models import Creance
@@ -59,7 +59,7 @@ class RedactionService:
     @staticmethod
     def _contexte(
         creance: Creance,
-        client: Client | None,
+        debiteur: Debiteur | None,
         relances: list[Relance],
         agent: User | None,
         organisation: Organisation | None,
@@ -69,7 +69,7 @@ class RedactionService:
         Seuls des faits : ce qui n'est pas dans ce bloc ne doit pas apparaitre dans
         le message rendu — la signature comprise, d'ou l'agent et le cabinet ici.
         """
-        nom = f"{client.prenom} {client.nom}".strip() if client else "le debiteur"
+        nom = f"{debiteur.prenom} {debiteur.nom}".strip() if debiteur else "le debiteur"
         lignes = [
             f"Debiteur : {nom}",
             f"Reference de la creance : {creance.reference}",
@@ -78,8 +78,8 @@ class RedactionService:
             f"Echeance : {creance.date_echeance.isoformat()}",
             f"Statut : {creance.statut.value}",
         ]
-        if client and client.entreprise:
-            lignes.append(f"Entreprise : {client.entreprise}")
+        if debiteur and debiteur.entreprise:
+            lignes.append(f"Entreprise : {debiteur.entreprise}")
         if agent:
             lignes.append(f"Agent en charge, signataire du message : {agent.prenom} {agent.nom}".rstrip())
         if organisation:
@@ -101,7 +101,7 @@ class RedactionService:
     async def generer_message(
         self,
         creance: Creance,
-        client: Client | None,
+        debiteur: Debiteur | None,
         relances: list[Relance],
         demande: MessageRelanceRequest,
         agent: User | None = None,
@@ -110,7 +110,7 @@ class RedactionService:
         """Renvoie (message, modele). Leve BadRequestException si la redaction echoue."""
         anthropic_client = self._obtenir_client()
 
-        consignes = [self._contexte(creance, client, relances, agent, organisation), ""]
+        consignes = [self._contexte(creance, debiteur, relances, agent, organisation), ""]
         if demande.ton:
             consignes.append(f"Registre demande : {demande.ton}.")
         if demande.instruction:

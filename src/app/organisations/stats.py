@@ -1,9 +1,9 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
-from app.clients.repository import ClientRepository
 from app.core.exceptions import NotFoundException
 from app.creances.repository import CreanceRepository
+from app.debiteurs.repository import DebiteurRepository
 from app.organisations.repository import OrganisationRepository
 from app.organisations.schemas import (
     Alerte,
@@ -32,7 +32,7 @@ class OrganisationStatsService:
     def __init__(
         self,
         organisation_repository: OrganisationRepository,
-        client_repository: ClientRepository,
+        debiteur_repository: DebiteurRepository,
         creance_repository: CreanceRepository,
         paiement_repository: PaiementRepository,
         relance_repository: RelanceRepository,
@@ -41,7 +41,7 @@ class OrganisationStatsService:
         promesse_repository: PromesseRepository,
     ) -> None:
         self.organisation_repository = organisation_repository
-        self.client_repository = client_repository
+        self.debiteur_repository = debiteur_repository
         self.creance_repository = creance_repository
         self.paiement_repository = paiement_repository
         self.relance_repository = relance_repository
@@ -321,7 +321,7 @@ class OrganisationStatsService:
             if await self.organisation_repository.get_by_id(organisation_id) is None:
                 raise NotFoundException(f"Organisation {organisation_id} introuvable")
 
-        nb_clients = await self.client_repository.count(organisation_id)
+        nb_debiteurs = await self.debiteur_repository.count(organisation_id)
         creances_par_statut = await self.creance_repository.count_by_statut(organisation_id)
         montant_total_initial, montant_total_restant = await self.creance_repository.sum_montants(organisation_id)
         nb_paiements, montant_total_encaisse = await self.paiement_repository.stats(organisation_id)
@@ -401,7 +401,7 @@ class OrganisationStatsService:
 
         return OrganisationStats(
             organisation_id=organisation_id,
-            nb_clients=nb_clients,
+            nb_debiteurs=nb_debiteurs,
             nb_creances=sum(creances_par_statut.values()),
             creances_par_statut=creances_par_statut,
             montant_total_initial=montant_total_initial,

@@ -34,23 +34,37 @@ Flux d'une requête : `router → service → repository → PostgreSQL`
 |---|---|
 | `organisations` | Les organisations clientes de la plateforme (tenants) |
 | `users` | Comptes utilisateurs, rôles, authentification JWT |
-| `clients` | Les débiteurs (qui doit de l'argent) |
-| `creances` | Les dettes (montant, échéance, statut) |
+| `debiteurs` | Les débiteurs : qui doit de l'argent |
+| `creances` | Les dettes (n° et date de facture, montant, échéance, statut) |
 | `paiements` | Les versements reçus sur une créance |
 | `relances` | Historique des actions de recouvrement (email, SMS, appel...) |
 | `ia` | Stubs pour l'analyse de dossiers / génération de messages (à développer) |
 
-`clients` sert de patron de référence pour la structure des autres domaines.
+`debiteurs` sert de patron de référence pour la structure des autres domaines.
+
+### Vocabulaire
+
+Le domaine `debiteurs` s'appelait `clients`, ce qui prêtait à confusion : dans un
+contexte de recouvrement, un « client » désigne plutôt le donneur d'ordre pour qui
+on recouvre. Les termes utilisés ici :
+
+- **débiteur** — celui qui doit de l'argent (`debiteurs`)
+- **créance** — la dette elle-même (`creances`)
+- **créancier** — celui à qui l'argent est dû ; aujourd'hui c'est toujours
+  l'organisation elle-même, il n'y a pas encore d'entité dédiée
+
+Le mot « client » reste accepté comme en-tête de colonne à l'import : les fichiers
+que les organisations envoient l'utilisent encore pour désigner le débiteur.
 
 ## Multi-tenant et rôles
 
 Trois rôles, hiérarchiques :
 
-- **`SUPER_ADMIN`** — transverse à toutes les organisations. Crée les organisations et leur premier compte `ADMIN`. Lecture seule sur les données métier de toutes les organisations (ne peut pas créer directement un client/une créance — il n'appartient à aucune organisation).
-- **`ADMIN`** — gère sa propre organisation. Crée des comptes `AGENT` (uniquement dans sa propre organisation, même s'il essaie de spécifier autre chose). Accès complet aux clients/créances/paiements/relances de son organisation.
-- **`AGENT`** — travaille au quotidien dans son organisation (clients, créances, paiements, relances).
+- **`SUPER_ADMIN`** — transverse à toutes les organisations. Crée les organisations et leur premier compte `ADMIN`. Lecture seule sur les données métier de toutes les organisations (ne peut pas créer directement un débiteur/une créance — il n'appartient à aucune organisation).
+- **`ADMIN`** — gère sa propre organisation. Crée des comptes `AGENT` (uniquement dans sa propre organisation, même s'il essaie de spécifier autre chose). Accès complet aux débiteurs/créances/paiements/relances de son organisation.
+- **`AGENT`** — travaille au quotidien dans son organisation (débiteurs, créances, paiements, relances).
 
-**Isolation stricte** : `clients`, `creances`, `paiements`, `relances` sont tous rattachés à une `organisation_id`, jamais fournie par l'appelant — toujours dérivée de l'utilisateur authentifié. Un `ADMIN`/`AGENT` ne voit jamais les données d'une autre organisation (404, pas 403, pour ne pas révéler leur existence).
+**Isolation stricte** : `debiteurs`, `creances`, `paiements`, `relances` sont tous rattachés à une `organisation_id`, jamais fournie par l'appelant — toujours dérivée de l'utilisateur authentifié. Un `ADMIN`/`AGENT` ne voit jamais les données d'une autre organisation (404, pas 403, pour ne pas révéler leur existence).
 
 ### Bootstrap du premier SUPER_ADMIN
 
@@ -81,10 +95,18 @@ Ensuite, via l'API, le SUPER_ADMIN peut créer des organisations (`POST /organis
 - `POST/GET/PATCH/DELETE /organisations` — réservé au `SUPER_ADMIN`
 - `GET /organisations/me` / `GET /organisations/me/stats` — infos et statistiques de sa propre organisation
 - `GET /organisations/{id}/stats` — statistiques d'une organisation (`SUPER_ADMIN`)
-- `POST/GET/PATCH/DELETE /clients` — débiteurs
-- `POST/GET/PATCH/DELETE /creances` — créances, `enregistrer_paiement` décrémente `montant_restant` et passe en `SOLDEE` à zéro
+- `POST/GET/PATCH/DELETE /debiteurs` — les débiteurs
+- `POST/GET/PATCH/DELETE /creances` — créances (filtrables par `?debiteur_id=`), `enregistrer_paiement` décrémente `montant_restant` et passe en `SOLDEE` à zéro
 - `POST/GET /paiements`
 - `POST/GET/PATCH/DELETE /relances`
+- `GET /imports/creances/modele` — modèle Excel à remplir ; `POST /imports/creances/preview` valide sans écrire, `POST /imports/creances` importe
+
+L'import accepte `.xlsx` et `.csv`, et tolère de nombreuses variantes d'en-têtes (accents,
+casse, `Client`/`Débiteur`, `N° facture`/`num_facture`, `Date facture`/`Date d'émission`...).
+Le numéro de facture alimente `numero_facture` ; à défaut de colonne `référence` dédiée il
+sert aussi de référence interne, ce qui fait rejeter le ré-import d'un même fichier plutôt
+que de créer des doublons. `date_facture` est facultative — une ligne sans elle passe, mais
+si elle est renseignée elle doit précéder l'échéance.
 
 Toutes les routes métier (hors `/auth/login` et `/health`) exigent un header `Authorization: Bearer <token>`.
 
@@ -218,11 +240,11 @@ sequenceDiagram
 ```mermaid
 erDiagram
     ORGANISATIONS ||--o{ USERS : "emploie"
-    ORGANISATIONS ||--o{ CLIENTS : "possede"
+    ORGANISATIONS ||--o{ DEBITEURS : "possede"
     ORGANISATIONS ||--o{ CREANCES : "possede"
     ORGANISATIONS ||--o{ PAIEMENTS : "possede"
     ORGANISATIONS ||--o{ RELANCES : "possede"
-    CLIENTS ||--o{ CREANCES : "doit"
+    DEBITEURS ||--o{ CREANCES : "doit"
     CREANCES ||--o{ PAIEMENTS : "recoit"
     CREANCES ||--o{ RELANCES : "fait l'objet de"
 
@@ -242,7 +264,7 @@ erDiagram
         int organisation_id FK "NULL uniquement pour SUPER_ADMIN"
         bool is_active
     }
-    CLIENTS {
+    DEBITEURS {
         int id PK
         int organisation_id FK
         string nom
@@ -254,10 +276,13 @@ erDiagram
     CREANCES {
         int id PK
         int organisation_id FK
-        int client_id FK
-        string reference "unique par organisation"
+        int debiteur_id FK
+        string reference "interne, unique par organisation"
+        string numero_facture "de la facture d'origine, nullable"
         decimal montant_initial
         decimal montant_restant
+        date date_facture "emission de la facture, nullable"
+        date date_saisie "entree dans l'outil"
         date date_echeance
         enum statut "EN_COURS / EN_RETARD / SOLDEE / LITIGE / ANNULEE"
     }
@@ -280,11 +305,24 @@ erDiagram
     }
 ```
 
-`organisation_id` est dupliqué sur `clients`, `creances`, `paiements` et `relances` (plutôt que de le déduire par jointure à chaque fois) pour que chaque requête de scoping par organisation reste une simple clause `WHERE`, sans risque d'oubli de jointure qui laisserait fuiter des données entre organisations.
+`organisation_id` est dupliqué sur `debiteurs`, `creances`, `paiements` et `relances` (plutôt que de le déduire par jointure à chaque fois) pour que chaque requête de scoping par organisation reste une simple clause `WHERE`, sans risque d'oubli de jointure qui laisserait fuiter des données entre organisations.
 
 ## Point important : migrations
 
 `main.py` crée les tables au démarrage via `Base.metadata.create_all` (dans le `lifespan`). C'est **provisoire** : `create_all` crée les tables manquantes mais ne modifie jamais une table existante (nouvelle colonne, contrainte...). Tant qu'Alembic n'est pas en place, tout changement de schéma nécessite de supprimer et recréer les tables concernées (perte des données de dev).
+
+En attendant, les changements de schéma sur une base contenant déjà des données sont livrés
+en SQL dans `migrations/`, à appliquer **avant** de démarrer la nouvelle version du backend :
+
+```bash
+docker exec postgres pg_dump -U recouvrement_user recouvrement_db > sauvegarde.sql
+docker exec -i postgres psql -v ON_ERROR_STOP=1 -U recouvrement_user -d recouvrement_db < migrations/001_client_vers_debiteur.sql
+```
+
+| Script | Effet |
+|---|---|
+| `001_client_vers_debiteur.sql` | `clients` → `debiteurs`, `creances.client_id` → `debiteur_id`, `date_creation` → `date_saisie`, ajout de `numero_facture` et `date_facture` |
+| `001_client_vers_debiteur_rollback.sql` | annule le script ci-dessus |
 
 À mettre en place :
 
