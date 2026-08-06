@@ -51,15 +51,24 @@ class PaiementRepository:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def total_encaisse_depuis(self, creance_id: int, depuis: date) -> Decimal:
-        """Somme encaissee sur une creance a partir d'une date incluse.
+    async def total_encaisse_depuis(self, dossier_id: int, debiteur_id: int, depuis: date) -> Decimal:
+        """Somme encaissee sur un dossier a partir d'une date incluse.
 
         Sert au controle des promesses : ce qui est tombe apres l'engagement dit si
         celui-ci a ete tenu. La date de paiement fait foi, pas la date de saisie.
+
+        L'agregat couvre toutes les factures de CE debiteur dans CE dossier : il a
+        tenu parole quelle que soit la facture sur laquelle l'encaissement a ete
+        impute, mais les paiements des autres debiteurs du dossier ne comptent pas.
         """
         result = await self.db.execute(
-            select(func.coalesce(func.sum(Paiement.montant), 0)).where(
-                Paiement.creance_id == creance_id, Paiement.date_paiement >= depuis
+            select(func.coalesce(func.sum(Paiement.montant), 0))
+            .select_from(Paiement)
+            .join(Creance, Creance.id == Paiement.creance_id)
+            .where(
+                Creance.dossier_id == dossier_id,
+                Creance.debiteur_id == debiteur_id,
+                Paiement.date_paiement >= depuis,
             )
         )
         return Decimal(result.scalar_one())

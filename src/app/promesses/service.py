@@ -2,7 +2,7 @@ from datetime import date
 
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.creances.repository import CreanceRepository
-from app.creances.service import CreanceService
+from app.dossiers.service import DossierService
 from app.ia.promesses import ExtractionPromessesIA
 from app.paiements.repository import PaiementRepository
 from app.promesses.models import Promesse, SourcePromesse, StatutPromesse
@@ -24,7 +24,7 @@ class PromesseService:
         paiement_repository: PaiementRepository,
         relance_repository: RelanceRepository,
         creance_repository: CreanceRepository,
-        creance_service: CreanceService,
+        dossier_service: DossierService,
         extraction: ExtractionPromessesIA,
         current_user: User,
     ) -> None:
@@ -32,7 +32,7 @@ class PromesseService:
         self.paiement_repository = paiement_repository
         self.relance_repository = relance_repository
         self.creance_repository = creance_repository
-        self.creance_service = creance_service
+        self.dossier_service = dossier_service
         self.extraction = extraction
         self.current_user = current_user
 
@@ -45,7 +45,7 @@ class PromesseService:
 
     async def create_promesse(self, data: PromesseCreate) -> Promesse:
         organisation_id = self._writable_organisation_id()
-        await self.creance_service.get_creance(data.creance_id)  # 404 si creance d'une autre organisation
+        await self.dossier_service.get_dossier(data.dossier_id)  # 404 si dossier d'une autre organisation
         return await self.repository.create(data, organisation_id)
 
     async def get_promesse(self, promesse_id: int) -> Promesse:
@@ -61,13 +61,13 @@ class PromesseService:
         self,
         skip: int = 0,
         limit: int = 100,
-        creance_id: int | None = None,
+        dossier_id: int | None = None,
         statut: StatutPromesse | None = None,
     ) -> list[Promesse]:
         return await self.repository.list(
             skip=skip,
             limit=limit,
-            creance_id=creance_id,
+            dossier_id=dossier_id,
             organisation_id=self.current_user.organisation_id,
             statut=statut,
         )
@@ -91,7 +91,7 @@ class PromesseService:
         La comparaison part de date_promesse et non de la date d'echeance : un
         debiteur qui paie en avance a tenu parole.
 
-        Limite assumee : sur une creance portant plusieurs promesses chevauchantes,
+        Limite assumee : sur un debiteur portant plusieurs promesses chevauchantes,
         un meme encaissement peut en valider plusieurs. Les distinguer supposerait
         d'affecter chaque paiement a un engagement precis, information dont on ne
         dispose pas.
@@ -102,7 +102,7 @@ class PromesseService:
         tenues = partielles = rompues = 0
         for promesse in a_controler:
             encaisse = await self.paiement_repository.total_encaisse_depuis(
-                promesse.creance_id, promesse.date_promesse
+                promesse.dossier_id, promesse.debiteur_id, promesse.date_promesse
             )
             if encaisse >= promesse.montant_promis:
                 promesse.statut = StatutPromesse.TENUE
@@ -143,8 +143,8 @@ class PromesseService:
                 relances_analysees=0, promesses_creees=0, sans_engagement=0, modele=""
             )
 
-        soldes = await self.creance_repository.soldes_par_id(
-            [r.creance_id for r in a_analyser]
+        soldes = await self.creance_repository.soldes_par_dossier_debiteur(
+            [(r.dossier_id, r.debiteur_id) for r in a_analyser]
         )
         engagements, modele = await self.extraction.extraire(a_analyser, soldes)
 
@@ -152,7 +152,8 @@ class PromesseService:
         promesses = [
             Promesse(
                 organisation_id=organisation_id,
-                creance_id=relances_par_id[e.relance_id].creance_id,
+                dossier_id=relances_par_id[e.relance_id].dossier_id,
+                debiteur_id=relances_par_id[e.relance_id].debiteur_id,
                 relance_id=e.relance_id,
                 date_promesse=relances_par_id[e.relance_id].date_relance,
                 date_echeance_promesse=e.date_echeance_promesse,

@@ -67,7 +67,9 @@ async def rediger_message_relance(
     """
     creance = await service.get_creance(creance_id)
     debiteur = await debiteur_service.get_debiteur(creance.debiteur_id)
-    relances = await relance_service.list_relances(creance_id=creance_id, limit=50)
+    # L'historique est celui du dossier : les relances precedentes couvraient
+    # toutes les factures du debiteur, pas seulement celle-ci.
+    relances = await relance_service.list_relances(dossier_id=creance.dossier_id, limit=50)
     # Charge explicitement : la relation User.organisation est lazy, y acceder
     # depuis current_user leverait MissingGreenlet en session async.
     organisation = (

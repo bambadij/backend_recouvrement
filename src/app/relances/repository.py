@@ -46,7 +46,8 @@ class RelanceRepository:
         self,
         skip: int = 0,
         limit: int = 100,
-        creance_id: int | None = None,
+        dossier_id: int | None = None,
+        debiteur_id: int | None = None,
         organisation_id: int | None = None,
         statut: StatutRelance | None = None,
         avec_resultat: bool | None = None,
@@ -54,8 +55,10 @@ class RelanceRepository:
         query = select(Relance)
         if organisation_id is not None:
             query = query.where(self._portee(organisation_id))
-        if creance_id is not None:
-            query = query.where(Relance.creance_id == creance_id)
+        if dossier_id is not None:
+            query = query.where(Relance.dossier_id == dossier_id)
+        if debiteur_id is not None:
+            query = query.where(Relance.debiteur_id == debiteur_id)
         if statut is not None:
             query = query.where(Relance.statut == statut)
         if avec_resultat is not None:
@@ -101,6 +104,10 @@ class RelanceRepository:
 
         Renvoie (id, reference, montant, jours, jamais_relancee).
 
+        Une creance est consideree relancee des qu'une relance a vise SON debiteur
+        dans SON dossier, meme si elle portait sur une autre de ses factures : un
+        seul courrier couvre tous les impayes de ce debiteur dans ce dossier.
+
         Les deux cas ne se mesurent pas sur la meme horloge, et les confondre
         ferait afficher un nombre invente :
         - deja relance -> jours ecoules depuis la derniere relance ;
@@ -110,8 +117,12 @@ class RelanceRepository:
         """
         aujourdhui = date.today()
         derniere = (
-            select(Relance.creance_id, func.max(Relance.date_relance).label("derniere"))
-            .group_by(Relance.creance_id)
+            select(
+                Relance.dossier_id,
+                Relance.debiteur_id,
+                func.max(Relance.date_relance).label("derniere"),
+            )
+            .group_by(Relance.dossier_id, Relance.debiteur_id)
             .subquery()
         )
         result = await self.db.execute(
@@ -122,7 +133,11 @@ class RelanceRepository:
                 Creance.date_echeance,
                 derniere.c.derniere,
             )
-            .outerjoin(derniere, derniere.c.creance_id == Creance.id)
+            .outerjoin(
+                derniere,
+                (derniere.c.dossier_id == Creance.dossier_id)
+                & (derniere.c.debiteur_id == Creance.debiteur_id),
+            )
             .where(
                 Creance.organisation_id == organisation_id
                 if organisation_id is not None

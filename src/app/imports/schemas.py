@@ -17,4 +17,6 @@ class ImportResult(BaseModel):
     debiteurs_crees: int
     debiteurs_reutilises: int
     creances_creees: int
+    #: Encaissements anterieurs repris depuis la colonne « montant regle ».
+    paiements_repris: int
     lignes_rejetees: list[ImportRowError]

@@ -49,15 +49,15 @@ class PromesseRepository:
         self,
         skip: int = 0,
         limit: int = 100,
-        creance_id: int | None = None,
+        dossier_id: int | None = None,
         organisation_id: int | None = None,
         statut: StatutPromesse | None = None,
     ) -> list[Promesse]:
         query = select(Promesse)
         if organisation_id is not None:
             query = query.where(self._portee(organisation_id))
-        if creance_id is not None:
-            query = query.where(Promesse.creance_id == creance_id)
+        if dossier_id is not None:
+            query = query.where(Promesse.dossier_id == dossier_id)
         if statut is not None:
             query = query.where(Promesse.statut == statut)
         query = query.order_by(Promesse.date_echeance_promesse.desc()).offset(skip).limit(limit)

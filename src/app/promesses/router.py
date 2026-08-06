@@ -24,10 +24,10 @@ async def list_promesses(
     service: PromesseServiceDep,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    creance_id: int | None = None,
+    dossier_id: int | None = None,
     statut: StatutPromesse | None = None,
 ) -> list[PromesseRead]:
-    promesses = await service.list_promesses(skip=skip, limit=limit, creance_id=creance_id, statut=statut)
+    promesses = await service.list_promesses(skip=skip, limit=limit, dossier_id=dossier_id, statut=statut)
     return [PromesseRead.model_validate(p) for p in promesses]
 
 

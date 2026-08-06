@@ -9,7 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
-    from app.creances.models import Creance
+    from app.debiteurs.models import Debiteur
+    from app.dossiers.models import Dossier
     from app.relances.models import Relance
 
 
@@ -38,7 +39,11 @@ class Promesse(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
-    creance_id: Mapped[int] = mapped_column(ForeignKey("creances.id", ondelete="CASCADE"), index=True)
+    # L'engagement porte sur le dossier, comme la relance dont il est extrait :
+    # « je paie 500 000 » vise la dette globale du debiteur chez ce creancier,
+    # pas une facture en particulier.
+    dossier_id: Mapped[int] = mapped_column(ForeignKey("dossiers.id", ondelete="CASCADE"), index=True)
+    debiteur_id: Mapped[int] = mapped_column(ForeignKey("debiteurs.id", ondelete="CASCADE"), index=True)
     # La relance d'ou sort l'engagement. Nul si la promesse a ete saisie hors relance
     # (appel entrant du debiteur, passage au guichet).
     relance_id: Mapped[int | None] = mapped_column(ForeignKey("relances.id", ondelete="SET NULL"), index=True)
@@ -63,5 +68,6 @@ class Promesse(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    creance: Mapped["Creance"] = relationship(back_populates="promesses")
+    dossier: Mapped["Dossier"] = relationship(back_populates="promesses")
+    debiteur: Mapped["Debiteur"] = relationship(back_populates="promesses")
     relance: Mapped["Relance | None"] = relationship(back_populates="promesses")

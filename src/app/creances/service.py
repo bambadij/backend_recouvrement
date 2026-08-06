@@ -8,6 +8,7 @@ from app.creances.models import Creance, StatutCreance
 from app.creances.repository import CreanceRepository
 from app.creances.schemas import CreanceCreate, CreanceUpdate
 from app.debiteurs.service import DebiteurService
+from app.dossiers.service import DossierService
 from app.organisations.repository import OrganisationRepository
 from app.users.models import User
 
@@ -17,11 +18,13 @@ class CreanceService:
         self,
         repository: CreanceRepository,
         debiteur_service: DebiteurService,
+        dossier_service: DossierService,
         organisation_repository: OrganisationRepository,
         current_user: User,
     ) -> None:
         self.repository = repository
         self.debiteur_service = debiteur_service
+        self.dossier_service = dossier_service
         self.organisation_repository = organisation_repository
         self.current_user = current_user
 
@@ -33,6 +36,11 @@ class CreanceService:
     async def create_creance(self, data: CreanceCreate) -> Creance:
         organisation_id = self._writable_organisation_id()
         await self.debiteur_service.get_debiteur(data.debiteur_id)  # 404 si debiteur d'une autre organisation
+
+        # 404 si le dossier appartient a une autre organisation. Un dossier peut
+        # porter plusieurs debiteurs : aucun controle de correspondance ici.
+        await self.dossier_service.get_dossier(data.dossier_id)
+
         if data.reference:
             # Reference fournie : on verifie juste l'unicite.
             if await self.repository.get_by_reference(data.reference, organisation_id):

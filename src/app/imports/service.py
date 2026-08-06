@@ -14,6 +14,9 @@ from app.creances.service import CreanceService
 from app.debiteurs.repository import DebiteurRepository
 from app.debiteurs.schemas import DebiteurCreate
 from app.imports.schemas import ImportPreview, ImportResult, ImportRowError
+from app.paiements.models import ModePaiement
+from app.paiements.schemas import PaiementCreate
+from app.paiements.service import PaiementService
 from app.users.models import User
 
 # En-tête normalisé -> champ canonique
@@ -164,10 +167,15 @@ def _parse_date(value: object) -> date | None:
 
 class ImportService:
     def __init__(
-        self, debiteur_repository: DebiteurRepository, creance_service: CreanceService, current_user: User
+        self,
+        debiteur_repository: DebiteurRepository,
+        creance_service: CreanceService,
+        paiement_service: PaiementService,
+        current_user: User,
     ) -> None:
         self.debiteur_repository = debiteur_repository
         self.creance_service = creance_service
+        self.paiement_service = paiement_service
         self.current_user = current_user
 
     def _organisation_id(self) -> int:
@@ -342,11 +350,20 @@ class ImportService:
 
     # ---------- Import réel ----------
 
-    async def commit(self, filename: str, content: bytes) -> ImportResult:
+    async def commit(self, filename: str, content: bytes, dossier_id: int) -> ImportResult:
+        """Importe le fichier dans un dossier existant.
+
+        Le dossier est choisi par l'agent, pas devine : un fichier correspond a
+        une demande recue d'un client — les trente etudiants d'une ecole entrent
+        dans le dossier que cette ecole a confie.
+        """
         rows = self._parse_file(filename, content)
         organisation_id = self._organisation_id()
+        # 404 si le dossier appartient a une autre organisation.
+        await self.creance_service.dossier_service.get_dossier(dossier_id)
 
         debiteurs_crees = 0
+        paiements_repris = 0
         debiteurs_reutilises = 0
         creances_creees = 0
         rejets: list[ImportRowError] = []
@@ -379,14 +396,31 @@ class ImportService:
                         cache_tel[telephone] = debiteur_id
 
                 creance = await self.creance_service.create_creance(
-                    CreanceCreate(debiteur_id=debiteur_id, **record["creance"])
+                    CreanceCreate(debiteur_id=debiteur_id, dossier_id=dossier_id, **record["creance"])
                 )
                 creances_creees += 1
-                # Reflète le montant déjà réglé (fichier source) : le restant passe au solde,
-                # et la créance devient SOLDEE si tout est payé.
+                # Montant déjà réglé dans le fichier source : on enregistre un vrai
+                # paiement, pas une simple décrémentation du restant. Sans cette ligne
+                # dans « paiements », le montant recouvré du tableau de bord ignorerait
+                # tout ce qui a été encaissé avant l'entrée du dossier dans l'outil,
+                # alors que le restant, lui, en tient compte — les deux chiffres se
+                # contrediraient. create_paiement décrémente la créance ET trace
+                # l'encaissement, d'où le passage par le service des paiements.
                 montant_regle = record.get("montant_regle") or Decimal("0")
                 if montant_regle > 0:
-                    await self.creance_service.enregistrer_paiement(creance.id, montant_regle)
+                    await self.paiement_service.create_paiement(
+                        PaiementCreate(
+                            creance_id=creance.id,
+                            montant=montant_regle,
+                            # Date de saisie de la créance, c'est-à-dire le jour de
+                            # l'import : la date réelle de l'encaissement n'est pas
+                            # dans le fichier, on ne l'invente pas.
+                            date_paiement=creance.date_saisie,
+                            mode_paiement=ModePaiement.REPRISE,
+                            notes="Montant déjà réglé, repris du fichier d'import",
+                        )
+                    )
+                    paiements_repris += 1
             except Exception as exc:  # noqa: BLE001 — on rejette la ligne sans casser l'import global
                 rejets.append(ImportRowError(ligne=ligne, message=str(exc)[:200]))
 
@@ -394,6 +428,7 @@ class ImportService:
             debiteurs_crees=debiteurs_crees,
             debiteurs_reutilises=debiteurs_reutilises,
             creances_creees=creances_creees,
+            paiements_repris=paiements_repris,
             lignes_rejetees=rejets,
         )
 

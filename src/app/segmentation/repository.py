@@ -60,13 +60,18 @@ class SegmentationRepository:
             return []
 
         creance_ids = [creance.id for creance, _ in lignes]
-        relances = await self._agregats_relances(creance_ids)
+        couples = [(c.dossier_id, c.debiteur_id) for c, _ in lignes]
+        # Les relances visent un debiteur dans un dossier, pas une facture : on
+        # agrege sur ce couple puis on redistribue sur ses creances.
+        relances = await self._agregats_relances(couples)
         paiements = await self._agregats_paiements(creance_ids)
         promesses = await self._agregats_promesses(creance_ids)
 
         faits: list[FaitsDossier] = []
         for creance, debiteur in lignes:
-            nb_relances, nb_echouees, derniere_relance = relances.get(creance.id, (0, 0, None))
+            nb_relances, nb_echouees, derniere_relance = relances.get(
+                (creance.dossier_id, creance.debiteur_id), (0, 0, None)
+            )
             nb_paiements, dernier_paiement = paiements.get(creance.id, (0, None))
             nb_promesses, tenues, rompues = promesses.get(creance.id, (0, 0, 0))
 
@@ -100,18 +105,22 @@ class SegmentationRepository:
             )
         return faits
 
-    async def _agregats_relances(self, creance_ids: list[int]) -> dict[int, tuple[int, int, date | None]]:
+    async def _agregats_relances(
+        self, couples: list[tuple[int, int]]
+    ) -> dict[tuple[int, int], tuple[int, int, date | None]]:
+        """Compteurs de relances par (dossier, debiteur) — la maille de relance."""
         result = await self.db.execute(
             select(
-                Relance.creance_id,
+                Relance.dossier_id,
+                Relance.debiteur_id,
                 func.count(),
                 func.count().filter(Relance.statut == StatutRelance.ECHOUEE),
                 func.max(Relance.date_relance),
             )
-            .where(Relance.creance_id.in_(creance_ids))
-            .group_by(Relance.creance_id)
+            .where(Relance.dossier_id.in_({d for d, _ in couples}))
+            .group_by(Relance.dossier_id, Relance.debiteur_id)
         )
-        return {row[0]: (row[1], row[2], row[3]) for row in result.all()}
+        return {(row[0], row[1]): (row[2], row[3], row[4]) for row in result.all()}
 
     async def _agregats_paiements(self, creance_ids: list[int]) -> dict[int, tuple[int, date | None]]:
         result = await self.db.execute(

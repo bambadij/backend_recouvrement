@@ -10,9 +10,8 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.debiteurs.models import Debiteur
+    from app.dossiers.models import Dossier
     from app.paiements.models import Paiement
-    from app.promesses.models import Promesse
-    from app.relances.models import Relance
     from app.segmentation.models import Segmentation
 
 
@@ -33,6 +32,10 @@ class Creance(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
     debiteur_id: Mapped[int] = mapped_column(ForeignKey("debiteurs.id", ondelete="CASCADE"), index=True)
+    # RESTRICT et non CASCADE : supprimer un dossier ne doit jamais faire
+    # disparaitre des impayes. Le service refuse la suppression d'un dossier
+    # qui porte encore des creances.
+    dossier_id: Mapped[int] = mapped_column(ForeignKey("dossiers.id", ondelete="RESTRICT"), index=True)
 
     # Reference interne, generee par l'application et unique par organisation.
     reference: Mapped[str] = mapped_column(String(50), index=True)
@@ -69,9 +72,8 @@ class Creance(Base):
     )
 
     debiteur: Mapped["Debiteur"] = relationship(back_populates="creances")
+    dossier: Mapped["Dossier"] = relationship(back_populates="creances")
     paiements: Mapped[list["Paiement"]] = relationship(back_populates="creance", cascade="all, delete-orphan")
-    relances: Mapped[list["Relance"]] = relationship(back_populates="creance", cascade="all, delete-orphan")
-    promesses: Mapped[list["Promesse"]] = relationship(back_populates="creance", cascade="all, delete-orphan")
     segmentation: Mapped["Segmentation | None"] = relationship(
         back_populates="creance", cascade="all, delete-orphan", uselist=False
     )

@@ -8,6 +8,8 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.creances.models import Creance
+    from app.promesses.models import Promesse
+    from app.relances.models import Relance
 
 
 class Debiteur(Base):
@@ -34,3 +36,5 @@ class Debiteur(Base):
     )
 
     creances: Mapped[list["Creance"]] = relationship(back_populates="debiteur", cascade="all, delete-orphan")
+    relances: Mapped[list["Relance"]] = relationship(back_populates="debiteur", cascade="all, delete-orphan")
+    promesses: Mapped[list["Promesse"]] = relationship(back_populates="debiteur", cascade="all, delete-orphan")

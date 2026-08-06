@@ -8,7 +8,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
-    from app.creances.models import Creance
+    from app.debiteurs.models import Debiteur
+    from app.dossiers.models import Dossier
     from app.promesses.models import Promesse
 
 
@@ -32,7 +33,12 @@ class Relance(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
-    creance_id: Mapped[int] = mapped_column(ForeignKey("creances.id", ondelete="CASCADE"), index=True)
+    # La relance vise un debiteur A L'INTERIEUR d'un dossier. Un dossier peut en
+    # contenir trente (les etudiants d'une ecole) : on ne relance pas « le
+    # dossier ». Mais on ne relance pas non plus facture par facture — un seul
+    # courrier couvre tous les impayes de ce debiteur dans ce dossier.
+    dossier_id: Mapped[int] = mapped_column(ForeignKey("dossiers.id", ondelete="CASCADE"), index=True)
+    debiteur_id: Mapped[int] = mapped_column(ForeignKey("debiteurs.id", ondelete="CASCADE"), index=True)
 
     type_relance: Mapped[TypeRelance] = mapped_column(Enum(TypeRelance, name="type_relance"))
     date_relance: Mapped[date] = mapped_column(default=date.today)
@@ -50,5 +56,6 @@ class Relance(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    creance: Mapped["Creance"] = relationship(back_populates="relances")
+    dossier: Mapped["Dossier"] = relationship(back_populates="relances")
+    debiteur: Mapped["Debiteur"] = relationship(back_populates="relances")
     promesses: Mapped[list["Promesse"]] = relationship(back_populates="relance")

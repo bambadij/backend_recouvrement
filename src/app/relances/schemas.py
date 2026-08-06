@@ -6,7 +6,9 @@ from app.relances.models import StatutRelance, TypeRelance
 
 
 class RelanceBase(BaseModel):
-    creance_id: int
+    dossier_id: int
+    #: Le debiteur vise dans ce dossier : un dossier peut en compter trente.
+    debiteur_id: int
     type_relance: TypeRelance
     date_relance: date = Field(default_factory=date.today)
     contenu: str | None = None
@@ -26,7 +28,8 @@ class RelanceRead(BaseModel):
 
     id: int
     organisation_id: int
-    creance_id: int
+    dossier_id: int
+    debiteur_id: int
     type_relance: TypeRelance
     date_relance: date
     statut: StatutRelance

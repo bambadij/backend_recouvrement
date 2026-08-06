@@ -18,14 +18,15 @@ async def list_relances(
     service: RelanceServiceDep,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    creance_id: int | None = None,
+    dossier_id: int | None = None,
+    debiteur_id: int | None = None,
     statut: StatutRelance | None = None,
     avec_resultat: bool | None = Query(
         None, description="true : uniquement les relances portant un resultat (engagement obtenu)"
     ),
 ) -> list[RelanceRead]:
     relances = await service.list_relances(
-        skip=skip, limit=limit, creance_id=creance_id, statut=statut, avec_resultat=avec_resultat
+        skip=skip, limit=limit, dossier_id=dossier_id, debiteur_id=debiteur_id, statut=statut, avec_resultat=avec_resultat
     )
     return [RelanceRead.model_validate(r) for r in relances]
 

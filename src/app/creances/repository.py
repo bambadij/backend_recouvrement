@@ -29,7 +29,9 @@ class CreanceRepository:
 
 
     async def create(self, data: CreanceCreate, organisation_id: int | None) -> Creance:
-        creance = Creance(**data.model_dump(), montant_restant=data.montant_initial, organisation_id=organisation_id)
+        creance = Creance(
+            **data.model_dump(), montant_restant=data.montant_initial, organisation_id=organisation_id
+        )
         self.db.add(creance)
         await self.db.commit()
         await self.db.refresh(creance)
@@ -38,18 +40,27 @@ class CreanceRepository:
     async def get_by_id(self, creance_id: int) -> Creance | None:
         return await self.db.get(Creance, creance_id)
 
-    async def soldes_par_id(self, creance_ids: list[int]) -> dict[int, Decimal]:
-        """Solde restant de chaque creance demandee.
+    async def soldes_par_dossier_debiteur(
+        self, couples: list[tuple[int, int]]
+    ) -> dict[tuple[int, int], Decimal]:
+        """Solde restant de chaque couple (dossier, debiteur) demande.
 
         Borne l'extraction des promesses : un engagement ne peut pas porter sur
-        plus que ce qui reste du.
+        plus que ce que ce debiteur doit encore dans ce dossier.
         """
-        if not creance_ids:
+        if not couples:
             return {}
+        dossier_ids = {d for d, _ in couples}
         result = await self.db.execute(
-            select(Creance.id, Creance.montant_restant).where(Creance.id.in_(creance_ids))
+            select(
+                Creance.dossier_id,
+                Creance.debiteur_id,
+                func.coalesce(func.sum(Creance.montant_restant), 0),
+            )
+            .where(Creance.dossier_id.in_(dossier_ids))
+            .group_by(Creance.dossier_id, Creance.debiteur_id)
         )
-        return {row[0]: row[1] for row in result.all()}
+        return {(row[0], row[1]): Decimal(row[2]) for row in result.all()}
 
     async def count(self, organisation_id: int | None) -> int:
         result = await self.db.execute(

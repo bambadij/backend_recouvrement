@@ -118,7 +118,7 @@ class ExtractionPromessesIA:
     async def extraire(
         self, relances: list[Relance], soldes: dict[int, Decimal]
     ) -> tuple[list[EngagementExtrait], str]:
-        """Renvoie (engagements, modele). `soldes` mappe creance_id -> montant restant."""
+        """Renvoie (engagements, modele). `soldes` mappe (dossier_id, debiteur_id) -> restant."""
         client = self._obtenir_client()
         engagements: list[EngagementExtrait] = []
         modele = settings.anthropic_model
@@ -138,7 +138,7 @@ class ExtractionPromessesIA:
                     "relance_id": r.id,
                     "date_relance": r.date_relance.isoformat(),
                     "canal": r.type_relance.value,
-                    "solde_restant_dossier": str(soldes.get(r.creance_id, 0)),
+                    "solde_restant_dossier": str(soldes.get((r.dossier_id, r.debiteur_id), 0)),
                     "compte_rendu": r.resultat,
                 }
                 for r in relances
@@ -227,7 +227,7 @@ class ExtractionPromessesIA:
                 logger.warning("Engagement mal forme sur la relance %s", relance.id)
                 continue
 
-            solde = soldes.get(relance.creance_id, Decimal(0))
+            solde = soldes.get((relance.dossier_id, relance.debiteur_id), Decimal(0))
             if montant <= 0 or (solde > 0 and montant > solde):
                 logger.warning("Montant promis incoherent sur la relance %s", relance.id)
                 continue

@@ -7,7 +7,8 @@ from app.promesses.models import SourcePromesse, StatutPromesse
 
 
 class PromesseBase(BaseModel):
-    creance_id: int
+    dossier_id: int
+    debiteur_id: int
     relance_id: int | None = None
     date_promesse: date = Field(default_factory=date.today)
     date_echeance_promesse: date
@@ -31,7 +32,7 @@ class PromesseRead(BaseModel):
 
     id: int
     organisation_id: int
-    creance_id: int
+    dossier_id: int
     relance_id: int | None
     date_promesse: date
     date_echeance_promesse: date

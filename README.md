@@ -32,29 +32,60 @@ Flux d'une requête : `router → service → repository → PostgreSQL`
 
 | Domaine | Rôle |
 |---|---|
-| `organisations` | Les organisations clientes de la plateforme (tenants) |
+| `organisations` | Les organisations utilisatrices de la plateforme (tenants) |
 | `users` | Comptes utilisateurs, rôles, authentification JWT |
-| `debiteurs` | Les débiteurs : qui doit de l'argent |
-| `creances` | Les dettes (n° et date de facture, montant, échéance, statut) |
+| `clients` | Ceux qui confient des demandes de recouvrement |
+| `creanciers` | Ceux à qui l'argent est dû, quand ce n'est pas le client |
+| `dossiers` | Les demandes confiées, référencées par le client |
+| `debiteurs` | Ceux qui doivent de l'argent |
+| `creances` | Les factures (n° et date de facture, montant, échéance, statut) |
 | `paiements` | Les versements reçus sur une créance |
-| `relances` | Historique des actions de recouvrement (email, SMS, appel...) |
-| `ia` | Stubs pour l'analyse de dossiers / génération de messages (à développer) |
+| `relances` | Actions de recouvrement, par débiteur et par dossier |
+| `promesses` | Engagements de paiement obtenus, saisis ou extraits par l'IA |
+| `segmentation` | Classement IA des dossiers par risque et potentiel |
+| `ia` | Rédaction de messages, extraction de promesses, priorisation |
 
-`debiteurs` sert de patron de référence pour la structure des autres domaines.
+### Le modèle métier
 
-### Vocabulaire
+Cinq notions, dans l'ordre où on les rencontre :
 
-Le domaine `debiteurs` s'appelait `clients`, ce qui prêtait à confusion : dans un
-contexte de recouvrement, un « client » désigne plutôt le donneur d'ordre pour qui
-on recouvre. Les termes utilisés ici :
+```mermaid
+flowchart TD
+    CL["Client : Institut Superieur"] -->|confie| DO
+    subgraph DO["Dossier ISM/BOURSES/2026-01"]
+        direction LR
+        D1["Awa Diop - facture SCO-2026-001 - 450 000 FCFA"]
+        D2["Modou Fall - facture SCO-2026-002 - 450 000 FCFA"]
+        D3["Fatou Ndiaye - facture SCO-2026-003 - 300 000 FCFA"]
+    end
+    RE["1 relance"] -.->|vise| D1
+```
 
-- **débiteur** — celui qui doit de l'argent (`debiteurs`)
-- **créance** — la dette elle-même (`creances`)
-- **créancier** — celui à qui l'argent est dû ; aujourd'hui c'est toujours
-  l'organisation elle-même, il n'y a pas encore d'entité dédiée
+Le dossier est la boîte : il regroupe trois débiteurs et leurs factures. La
+relance, elle, ne vise qu'Awa Diop — pas les deux autres.
 
-Le mot « client » reste accepté comme en-tête de colonne à l'import : les fichiers
-que les organisations envoient l'utilisent encore pour désigner le débiteur.
+- **Client** — celui qui confie la demande. L'école, la pharmacie, ou un
+  intermédiaire comme un assureur-crédit. C'est l'interlocuteur du dossier.
+- **Dossier** — la demande elle-même. Sa **référence vient du client** et n'est
+  jamais générée : les formats varient (`DT 586 780`, `SOF/TRD/08/2025`) et elle
+  peut manquer. Un dossier porte **plusieurs débiteurs** — une école confie en une
+  fois les impayés de trente étudiants.
+- **Débiteur** — celui qui doit. Rattaché à la facture, pas au dossier.
+- **Créance** — la facture : numéro et date d'émission, montant, échéance.
+- **Créancier** — celui à qui l'argent est dû. `dossiers.creancier_id` reste
+  **NULL quand c'est le client lui-même**, ce qui est le cas courant : plutôt que
+  de dupliquer la même entité dans deux tables, l'API retombe alors sur le nom du
+  client. Le champ n'est renseigné que lorsque les deux diffèrent — un assureur
+  confie la créance de l'entreprise qu'il assure.
+
+**Maille de relance.** Une relance vise un débiteur **à l'intérieur** d'un
+dossier, jamais le dossier entier (on ne relance pas trente étudiants d'un coup)
+ni facture par facture (un seul courrier couvre tous les impayés de ce débiteur
+dans ce dossier). Les promesses suivent la même maille, puisqu'elles sont
+extraites des relances.
+
+Le mot « client » reste accepté comme en-tête de colonne à l'import pour désigner
+le débiteur : les fichiers historiques des organisations l'utilisent encore.
 
 ## Multi-tenant et rôles
 
@@ -64,7 +95,7 @@ Trois rôles, hiérarchiques :
 - **`ADMIN`** — gère sa propre organisation. Crée des comptes `AGENT` (uniquement dans sa propre organisation, même s'il essaie de spécifier autre chose). Accès complet aux débiteurs/créances/paiements/relances de son organisation.
 - **`AGENT`** — travaille au quotidien dans son organisation (débiteurs, créances, paiements, relances).
 
-**Isolation stricte** : `debiteurs`, `creances`, `paiements`, `relances` sont tous rattachés à une `organisation_id`, jamais fournie par l'appelant — toujours dérivée de l'utilisateur authentifié. Un `ADMIN`/`AGENT` ne voit jamais les données d'une autre organisation (404, pas 403, pour ne pas révéler leur existence).
+**Isolation stricte** : `clients`, `creanciers`, `dossiers`, `debiteurs`, `creances`, `paiements`, `relances` sont tous rattachés à une `organisation_id`, jamais fournie par l'appelant — toujours dérivée de l'utilisateur authentifié. Un `ADMIN`/`AGENT` ne voit jamais les données d'une autre organisation (404, pas 403, pour ne pas révéler leur existence).
 
 ### Bootstrap du premier SUPER_ADMIN
 
@@ -95,18 +126,29 @@ Ensuite, via l'API, le SUPER_ADMIN peut créer des organisations (`POST /organis
 - `POST/GET/PATCH/DELETE /organisations` — réservé au `SUPER_ADMIN`
 - `GET /organisations/me` / `GET /organisations/me/stats` — infos et statistiques de sa propre organisation
 - `GET /organisations/{id}/stats` — statistiques d'une organisation (`SUPER_ADMIN`)
+- `POST/GET/PATCH/DELETE /clients` — les donneurs d'ordre
+- `POST/GET/PATCH/DELETE /creanciers` — à créer seulement quand le créancier diffère du client
+- `POST/GET/PATCH/DELETE /dossiers` — les demandes (filtrables par `?client_id=`, `?creancier_id=`, `?statut=`). La liste renvoie les noms des parties et les totaux agrégés
 - `POST/GET/PATCH/DELETE /debiteurs` — les débiteurs
-- `POST/GET/PATCH/DELETE /creances` — créances (filtrables par `?debiteur_id=`), `enregistrer_paiement` décrémente `montant_restant` et passe en `SOLDEE` à zéro
+- `POST/GET/PATCH/DELETE /creances` — factures (filtrables par `?debiteur_id=`), `enregistrer_paiement` décrémente `montant_restant` et passe en `SOLDEE` à zéro
 - `POST/GET /paiements`
-- `POST/GET/PATCH/DELETE /relances`
+- `POST/GET/PATCH/DELETE /relances` — filtrables par `?dossier_id=` et `?debiteur_id=`
 - `GET /imports/creances/modele` — modèle Excel à remplir ; `POST /imports/creances/preview` valide sans écrire, `POST /imports/creances` importe
 
-L'import accepte `.xlsx` et `.csv`, et tolère de nombreuses variantes d'en-têtes (accents,
+**Ordre de création.** Une créance exige un `dossier_id`, et un dossier exige un
+`client_id` : la saisie va donc toujours **client → dossier → factures**. Rien n'est
+créé implicitement, y compris à l'import.
+
+L'import prend un `dossier_id` en champ de formulaire : un fichier correspond à une
+demande d'un client, on ne devine pas dans quel dossier les lignes atterrissent. Il
+accepte `.xlsx` et `.csv`, et tolère de nombreuses variantes d'en-têtes (accents,
 casse, `Client`/`Débiteur`, `N° facture`/`num_facture`, `Date facture`/`Date d'émission`...).
 Le numéro de facture alimente `numero_facture` ; à défaut de colonne `référence` dédiée il
 sert aussi de référence interne, ce qui fait rejeter le ré-import d'un même fichier plutôt
 que de créer des doublons. `date_facture` est facultative — une ligne sans elle passe, mais
-si elle est renseignée elle doit précéder l'échéance.
+si elle est renseignée elle doit précéder l'échéance. La colonne « montant réglé » crée un
+vrai paiement en mode `REPRISE`, daté du jour de l'import : sans cela le montant recouvré
+du tableau de bord ignorerait ces encaissements alors que le restant dû en tient compte.
 
 Toutes les routes métier (hors `/auth/login` et `/health`) exigent un header `Authorization: Bearer <token>`.
 
@@ -240,29 +282,51 @@ sequenceDiagram
 ```mermaid
 erDiagram
     ORGANISATIONS ||--o{ USERS : "emploie"
+    ORGANISATIONS ||--o{ CLIENTS : "possede"
+    ORGANISATIONS ||--o{ CREANCIERS : "possede"
+    ORGANISATIONS ||--o{ DOSSIERS : "possede"
     ORGANISATIONS ||--o{ DEBITEURS : "possede"
-    ORGANISATIONS ||--o{ CREANCES : "possede"
-    ORGANISATIONS ||--o{ PAIEMENTS : "possede"
-    ORGANISATIONS ||--o{ RELANCES : "possede"
+    CLIENTS ||--o{ DOSSIERS : "confie"
+    CREANCIERS |o--o{ DOSSIERS : "est creancier de"
+    DOSSIERS ||--o{ CREANCES : "regroupe"
     DEBITEURS ||--o{ CREANCES : "doit"
+    DOSSIERS ||--o{ RELANCES : "fait l'objet de"
+    DEBITEURS ||--o{ RELANCES : "est relance"
+    DOSSIERS ||--o{ PROMESSES : "porte"
     CREANCES ||--o{ PAIEMENTS : "recoit"
-    CREANCES ||--o{ RELANCES : "fait l'objet de"
 
     ORGANISATIONS {
         int id PK
         string nom UK
-        string description
         bool is_active
     }
     USERS {
         int id PK
-        string nom
-        string prenom
         string email UK
-        string hashed_password
         enum role "SUPER_ADMIN / ADMIN / AGENT"
         int organisation_id FK "NULL uniquement pour SUPER_ADMIN"
-        bool is_active
+    }
+    CLIENTS {
+        int id PK
+        int organisation_id FK
+        string nom "unique par organisation"
+        bool is_interne "represente l'organisation elle-meme"
+    }
+    CREANCIERS {
+        int id PK
+        int organisation_id FK
+        string nom "unique par organisation"
+    }
+    DOSSIERS {
+        int id PK
+        int organisation_id FK
+        int client_id FK
+        int creancier_id FK "NULL = le creancier est le client"
+        string reference "du client, libre, nullable"
+        date date_reception
+        enum type_dossier "EXPORT / LOCAL"
+        enum objectif "AMIABLE / JUDICIAIRE"
+        enum statut "OUVERT / LITIGE / CLOS"
     }
     DEBITEURS {
         int id PK
@@ -271,41 +335,48 @@ erDiagram
         string prenom
         string email "unique par organisation"
         string telephone
-        string entreprise
     }
     CREANCES {
         int id PK
         int organisation_id FK
+        int dossier_id FK
         int debiteur_id FK
         string reference "interne, unique par organisation"
         string numero_facture "de la facture d'origine, nullable"
         decimal montant_initial
         decimal montant_restant
-        date date_facture "emission de la facture, nullable"
+        date date_facture "emission, nullable"
         date date_saisie "entree dans l'outil"
         date date_echeance
         enum statut "EN_COURS / EN_RETARD / SOLDEE / LITIGE / ANNULEE"
     }
     PAIEMENTS {
         int id PK
-        int organisation_id FK
         int creance_id FK
         decimal montant
         date date_paiement
-        enum mode_paiement "VIREMENT / CHEQUE / ESPECES / CARTE / PRELEVEMENT"
+        enum mode_paiement "VIREMENT / CHEQUE / ESPECES / CARTE / PRELEVEMENT / REPRISE"
     }
     RELANCES {
         int id PK
-        int organisation_id FK
-        int creance_id FK
-        enum type_relance "EMAIL / SMS / APPEL / COURRIER / MISE_EN_DEMEURE"
+        int dossier_id FK
+        int debiteur_id FK "la relance vise un debiteur dans le dossier"
+        enum type_relance "EMAIL / SMS / WHATSAPP / APPEL / COURRIER / MISE_EN_DEMEURE"
         date date_relance
         enum statut "PLANIFIEE / ENVOYEE / ECHOUEE"
-        string contenu
+    }
+    PROMESSES {
+        int id PK
+        int dossier_id FK
+        int debiteur_id FK
+        int relance_id FK "nullable : promesse saisie hors relance"
+        decimal montant_promis
+        date date_echeance_promesse
+        enum statut "ATTENDUE / TENUE / PARTIELLE / ROMPUE"
     }
 ```
 
-`organisation_id` est dupliqué sur `debiteurs`, `creances`, `paiements` et `relances` (plutôt que de le déduire par jointure à chaque fois) pour que chaque requête de scoping par organisation reste une simple clause `WHERE`, sans risque d'oubli de jointure qui laisserait fuiter des données entre organisations.
+`organisation_id` est dupliqué sur `clients`, `creanciers`, `dossiers`, `debiteurs`, `creances`, `paiements` et `relances` (plutôt que de le déduire par jointure à chaque fois) pour que chaque requête de scoping par organisation reste une simple clause `WHERE`, sans risque d'oubli de jointure qui laisserait fuiter des données entre organisations.
 
 ## Point important : migrations
 
@@ -323,6 +394,9 @@ docker exec -i postgres psql -v ON_ERROR_STOP=1 -U recouvrement_user -d recouvre
 |---|---|
 | `001_client_vers_debiteur.sql` | `clients` → `debiteurs`, `creances.client_id` → `debiteur_id`, `date_creation` → `date_saisie`, ajout de `numero_facture` et `date_facture` |
 | `001_client_vers_debiteur_rollback.sql` | annule le script ci-dessus |
+| `002_paiements_reprise.sql` | mode de paiement `REPRISE` + rattrapage des encaissements repris à l'import qui n'avaient jamais créé de ligne de paiement |
+| `003_creanciers_et_dossiers.sql` | première version des dossiers — **remplacée par la 004**, conservée pour l'historique |
+| `004_refonte_client_dossier.sql` | modèle actuel : `clients`, `creanciers`, `dossiers` porteurs de plusieurs débiteurs, relances et promesses par (dossier, débiteur). **Supprime les données métier** — les tables sont recréées vides par `create_all` au démarrage |
 
 À mettre en place :
 

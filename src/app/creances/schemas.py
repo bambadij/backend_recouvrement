@@ -9,6 +9,9 @@ from app.creances.models import StatutCreance
 
 class CreanceBase(BaseModel):
     debiteur_id: int
+    #: Le dossier dont cette facture fait partie. Obligatoire : toute creance
+    #: appartient a une demande confiee par un client.
+    dossier_id: int
     # Numero de la facture d'origine, celui que le debiteur reconnait.
     numero_facture: str | None = None
     description: str | None = None
@@ -54,6 +57,7 @@ class CreanceRead(BaseModel):
     id: int
     organisation_id: int
     debiteur_id: int
+    dossier_id: int
     reference: str
     numero_facture: str | None
     description: str | None
