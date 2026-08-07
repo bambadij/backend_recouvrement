@@ -1,11 +1,12 @@
 from collections import Counter
 
-from app.core.exceptions import ForbiddenException
+from app.core.exceptions import ForbiddenException, NotFoundException
 from app.ia.segmentation import ClassificationIA
 from app.segmentation.models import PotentielRecouvrement, Segmentation
 from app.segmentation.repository import SegmentationRepository
 from app.segmentation.schemas import (
     DossierSegmente,
+    SegmentationRead,
     SegmentationRequest,
     SegmentationRunResult,
 )
@@ -85,6 +86,21 @@ class SegmentationService:
             repartition=dict(repartition),
             modele=modele,
         )
+
+    async def segmentation_de_creance(self, creance_id: int) -> SegmentationRead:
+        """Le classement courant d'une creance, pour l'afficher sur son detail.
+
+        Lecture pure : aucun appel de modele. Une creance jamais classee — parce
+        qu'elle est recente, ou soldee et donc hors de la file — n'est pas une
+        erreur applicative, mais l'interface doit pouvoir le distinguer d'un
+        classement existant : d'ou le 404 plutot qu'un objet vide.
+        """
+        segmentation = await self.repository.get_scoped_by_creance(
+            creance_id, self.current_user.organisation_id
+        )
+        if segmentation is None:
+            raise NotFoundException("Cette creance n'a pas encore ete classee")
+        return SegmentationRead.model_validate(segmentation)
 
     async def file_de_travail(self, limit: int = 200) -> list[DossierSegmente]:
         """Les dossiers classes, dans l'ordre ou les agents doivent les traiter."""

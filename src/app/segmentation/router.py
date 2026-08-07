@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query
 from app.segmentation.dependencies import SegmentationServiceDep
 from app.segmentation.schemas import (
     DossierSegmente,
+    SegmentationRead,
     SegmentationRequest,
     SegmentationRunResult,
 )
@@ -32,3 +33,15 @@ async def file_de_travail(
     Lecture pure — aucun appel de modele, le classement vient de la base.
     """
     return await service.file_de_travail(limit=limit)
+
+
+@router.get("/creance/{creance_id}", response_model=SegmentationRead)
+async def segmentation_de_creance(
+    creance_id: int, service: SegmentationServiceDep
+) -> SegmentationRead:
+    """Le classement courant d'une creance, pour son detail.
+
+    Lecture pure, comme /file : la page de detail ne declenche jamais un appel
+    de modele a l'affichage. 404 tant que la creance n'a pas ete classee.
+    """
+    return await service.segmentation_de_creance(creance_id)

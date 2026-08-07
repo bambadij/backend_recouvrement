@@ -175,7 +175,26 @@ class SegmentationRepository:
         return {row[0]: row[1].value for row in result.all()}
 
     async def get_by_creance(self, creance_id: int) -> Segmentation | None:
+        """Sans portee : reserve aux appels internes ou l'id vient deja d'une requete cadrée."""
         result = await self.db.execute(select(Segmentation).where(Segmentation.creance_id == creance_id))
+        return result.scalar_one_or_none()
+
+    async def get_scoped_by_creance(
+        self, creance_id: int, organisation_id: int | None
+    ) -> Segmentation | None:
+        """Variante cadrée a l'organisation, seule utilisable depuis une route.
+
+        La jointure sur Creance est ce qui porte l'isolation : la table
+        segmentations ne stocke pas d'organisation_id propre, donc filtrer
+        uniquement sur creance_id laisserait lire le classement d'un autre
+        client en devinant un identifiant.
+        """
+        query = (
+            select(Segmentation)
+            .join(Creance, Segmentation.creance_id == Creance.id)
+            .where(Segmentation.creance_id == creance_id, self._portee(organisation_id))
+        )
+        result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
     async def enregistrer(self, segmentations: list[Segmentation]) -> None:
