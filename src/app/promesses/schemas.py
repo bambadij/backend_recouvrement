@@ -33,6 +33,9 @@ class PromesseRead(BaseModel):
     id: int
     organisation_id: int
     dossier_id: int
+    # Expose pour que les vues de suivi nomment le debiteur concerne : un dossier
+    # porte plusieurs debiteurs, le seul dossier_id ne dit pas qui s'est engage.
+    debiteur_id: int
     relance_id: int | None
     date_promesse: date
     date_echeance_promesse: date
