@@ -2,12 +2,16 @@ from fastapi import APIRouter, Query, status
 
 from app.creanciers.dependencies import CreancierServiceDep
 from app.creanciers.schemas import CreancierCreate, CreancierRead, CreancierUpdate
+from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/creanciers", tags=["creanciers"])
 
 
+# Referentiel : creation et suppression reservees a l'ADMIN.
 @router.post("", response_model=CreancierRead, status_code=status.HTTP_201_CREATED)
-async def create_creancier(data: CreancierCreate, service: CreancierServiceDep) -> CreancierRead:
+async def create_creancier(
+    data: CreancierCreate, service: CreancierServiceDep, _: CurrentAdminDep
+) -> CreancierRead:
     creancier = await service.create_creancier(data)
     return CreancierRead.model_validate(creancier)
 
@@ -38,5 +42,5 @@ async def update_creancier(
 
 
 @router.delete("/{creancier_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_creancier(creancier_id: int, service: CreancierServiceDep) -> None:
+async def delete_creancier(creancier_id: int, service: CreancierServiceDep, _: CurrentAdminDep) -> None:
     await service.delete_creancier(creancier_id)

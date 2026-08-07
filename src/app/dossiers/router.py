@@ -3,10 +3,13 @@ from fastapi import APIRouter, Query, status
 from app.dossiers.dependencies import DossierServiceDep
 from app.dossiers.models import StatutDossier
 from app.dossiers.schemas import DossierCreate, DossierListItem, DossierRead, DossierUpdate
+from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/dossiers", tags=["dossiers"])
 
 
+# Referentiel : ouvrir un dossier engage l'organisation vis-a-vis du client, et
+# le supprimer efface une demande recue. Reserve a l'ADMIN.
 @router.post("", response_model=DossierRead, status_code=status.HTTP_201_CREATED)
 async def create_dossier(data: DossierCreate, service: DossierServiceDep) -> DossierRead:
     dossier = await service.create_dossier(data)
@@ -40,5 +43,5 @@ async def update_dossier(dossier_id: int, data: DossierUpdate, service: DossierS
 
 
 @router.delete("/{dossier_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_dossier(dossier_id: int, service: DossierServiceDep) -> None:
+async def delete_dossier(dossier_id: int, service: DossierServiceDep, _: CurrentAdminDep) -> None:
     await service.delete_dossier(dossier_id)

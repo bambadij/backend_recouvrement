@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query, status
 
 from app.debiteurs.dependencies import DebiteurServiceDep
 from app.debiteurs.schemas import DebiteurCreate, DebiteurRead, DebiteurUpdate
+from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/debiteurs", tags=["debiteurs"])
 
@@ -36,5 +37,5 @@ async def update_debiteur(debiteur_id: int, data: DebiteurUpdate, service: Debit
 
 
 @router.delete("/{debiteur_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_debiteur(debiteur_id: int, service: DebiteurServiceDep) -> None:
+async def delete_debiteur(debiteur_id: int, service: DebiteurServiceDep, _: CurrentAdminDep) -> None:
     await service.delete_debiteur(debiteur_id)

@@ -13,6 +13,7 @@ from app.creances.schemas import CreanceCreate
 from app.creances.service import CreanceService
 from app.debiteurs.repository import DebiteurRepository
 from app.debiteurs.schemas import DebiteurCreate
+from app.debiteurs.telephone import normaliser as normaliser_telephone
 from app.imports.schemas import ImportPreview, ImportResult, ImportRowError
 from app.paiements.models import ModePaiement
 from app.paiements.schemas import PaiementCreate
@@ -367,7 +368,11 @@ class ImportService:
         debiteurs_reutilises = 0
         creances_creees = 0
         rejets: list[ImportRowError] = []
+        # Caches de la passe en cours, sur la forme canonique du telephone et sur
+        # l'email : deux lignes du meme fichier designant la meme personne doivent
+        # se rejoindre sans aller-retour en base.
         cache_tel: dict[str, int] = {}
+        cache_email: dict[str, int] = {}
 
         for row in rows:
             ligne = row["__ligne__"]
@@ -377,10 +382,14 @@ class ImportService:
                 continue
             try:
                 debiteur_id = None
-                telephone = record["telephone"]
+                telephone = normaliser_telephone(record["telephone"])
+                email = (record["debiteur"].email or "").strip().lower() or None
+
+                # Telephone d'abord : c'est l'identifiant le plus souvent renseigne.
                 if telephone:
                     if telephone in cache_tel:
                         debiteur_id = cache_tel[telephone]
+                        debiteurs_reutilises += 1
                     else:
                         existant = await self.debiteur_repository.get_by_telephone(telephone, organisation_id)
                         if existant is not None:
@@ -388,12 +397,28 @@ class ImportService:
                             debiteurs_reutilises += 1
                             cache_tel[telephone] = debiteur_id
 
+                # Email ensuite : il porte une contrainte d'unicite en base, donc
+                # sans ce rattrapage la creation echouerait au lieu de reutiliser.
+                if debiteur_id is None and email:
+                    if email in cache_email:
+                        debiteur_id = cache_email[email]
+                        debiteurs_reutilises += 1
+                    else:
+                        existant = await self.debiteur_repository.get_by_email(email, organisation_id)
+                        if existant is not None:
+                            debiteur_id = existant.id
+                            debiteurs_reutilises += 1
+                            cache_email[email] = debiteur_id
+
                 if debiteur_id is None:
                     debiteur = await self.debiteur_repository.create(record["debiteur"], organisation_id)
                     debiteur_id = debiteur.id
                     debiteurs_crees += 1
-                    if telephone:
-                        cache_tel[telephone] = debiteur_id
+
+                if telephone:
+                    cache_tel.setdefault(telephone, debiteur_id)
+                if email:
+                    cache_email.setdefault(email, debiteur_id)
 
                 creance = await self.creance_service.create_creance(
                     CreanceCreate(debiteur_id=debiteur_id, dossier_id=dossier_id, **record["creance"])
@@ -422,6 +447,10 @@ class ImportService:
                     )
                     paiements_repris += 1
             except Exception as exc:  # noqa: BLE001 — on rejette la ligne sans casser l'import global
+                # Une violation de contrainte laisse la session en echec : sans ce
+                # rollback, toutes les lignes suivantes seraient rejetees a leur tour
+                # avec « transaction has been rolled back », y compris les valides.
+                await self.debiteur_repository.rollback()
                 rejets.append(ImportRowError(ligne=ligne, message=str(exc)[:200]))
 
         return ImportResult(

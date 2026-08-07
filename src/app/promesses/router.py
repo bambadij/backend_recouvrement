@@ -9,6 +9,7 @@ from app.promesses.schemas import (
     PromesseRead,
     PromesseUpdate,
 )
+from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/promesses", tags=["promesses"])
 
@@ -68,5 +69,5 @@ async def update_promesse(
 
 
 @router.delete("/{promesse_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_promesse(promesse_id: int, service: PromesseServiceDep) -> None:
+async def delete_promesse(promesse_id: int, service: PromesseServiceDep, _: CurrentAdminDep) -> None:
     await service.delete_promesse(promesse_id)

@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.debiteurs.models import Debiteur
 from app.debiteurs.schemas import DebiteurCreate, DebiteurUpdate
+from app.debiteurs.telephone import normaliser
 
 
 class DebiteurRepository:
@@ -20,7 +21,11 @@ class DebiteurRepository:
         return Debiteur.organisation_id == organisation_id if organisation_id is not None else true()
 
     async def create(self, data: DebiteurCreate, organisation_id: int | None) -> Debiteur:
-        debiteur = Debiteur(**data.model_dump(), organisation_id=organisation_id)
+        champs = data.model_dump()
+        # La forme canonique est derivee ici, jamais fournie par l'appelant : elle
+        # doit rester en phase avec « telephone » quel que soit le chemin d'entree.
+        champs["telephone_normalise"] = normaliser(champs.get("telephone"))
+        debiteur = Debiteur(**champs, organisation_id=organisation_id)
         self.db.add(debiteur)
         await self.db.commit()
         await self.db.refresh(debiteur)
@@ -36,9 +41,13 @@ class DebiteurRepository:
         return result.scalar_one_or_none()
 
     async def get_by_telephone(self, telephone: str, organisation_id: int | None) -> Debiteur | None:
+        """Recherche sur la forme canonique : « +221 77 000 11 11 » retrouve « 770001111 »."""
+        canonique = normaliser(telephone)
+        if canonique is None:
+            return None
         result = await self.db.execute(
             select(Debiteur)
-            .where(Debiteur.telephone == telephone, self._portee(organisation_id))
+            .where(Debiteur.telephone_normalise == canonique, self._portee(organisation_id))
             .limit(1)
         )
         return result.scalars().first()
@@ -59,11 +68,23 @@ class DebiteurRepository:
         return list(result.scalars().all())
 
     async def update(self, debiteur: Debiteur, data: DebiteurUpdate) -> Debiteur:
-        for field, value in data.model_dump(exclude_unset=True).items():
+        modifies = data.model_dump(exclude_unset=True)
+        for field, value in modifies.items():
             setattr(debiteur, field, value)
+        if "telephone" in modifies:
+            debiteur.telephone_normalise = normaliser(modifies["telephone"])
         await self.db.commit()
         await self.db.refresh(debiteur)
         return debiteur
+
+    async def rollback(self) -> None:
+        """Annule la transaction en cours.
+
+        Indispensable apres une violation de contrainte pendant un import : sans
+        cela la session reste en echec et TOUTES les lignes suivantes echouent,
+        y compris les valides.
+        """
+        await self.db.rollback()
 
     async def delete(self, debiteur: Debiteur) -> None:
         await self.db.delete(debiteur)

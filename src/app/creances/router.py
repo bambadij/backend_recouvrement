@@ -8,7 +8,7 @@ from app.ia.dependencies import RedactionServiceDep
 from app.ia.schemas import MessageRelanceRequest, MessageRelanceResponse
 from app.organisations.dependencies import OrganisationServiceDep
 from app.relances.dependencies import RelanceServiceDep
-from app.users.dependencies import CurrentUserDep
+from app.users.dependencies import CurrentAdminDep, CurrentUserDep
 
 router = APIRouter(prefix="/creances", tags=["creances"])
 
@@ -44,7 +44,7 @@ async def update_creance(creance_id: int, data: CreanceUpdate, service: CreanceS
 
 
 @router.delete("/{creance_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_creance(creance_id: int, service: CreanceServiceDep) -> None:
+async def delete_creance(creance_id: int, service: CreanceServiceDep, _: CurrentAdminDep) -> None:
     await service.delete_creance(creance_id)
 
 

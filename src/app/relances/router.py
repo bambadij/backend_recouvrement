@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query, status
 from app.relances.dependencies import RelanceServiceDep
 from app.relances.models import StatutRelance
 from app.relances.schemas import RelanceCreate, RelanceRead, RelanceUpdate
+from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/relances", tags=["relances"])
 
@@ -44,5 +45,5 @@ async def update_relance(relance_id: int, data: RelanceUpdate, service: RelanceS
 
 
 @router.delete("/{relance_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_relance(relance_id: int, service: RelanceServiceDep) -> None:
+async def delete_relance(relance_id: int, service: RelanceServiceDep, _: CurrentAdminDep) -> None:
     await service.delete_relance(relance_id)

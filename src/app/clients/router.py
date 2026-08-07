@@ -2,12 +2,15 @@ from fastapi import APIRouter, Query, status
 
 from app.clients.dependencies import ClientServiceDep
 from app.clients.schemas import ClientCreate, ClientRead, ClientUpdate
+from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 
+# Referentiel : sa creation et sa suppression sont reservees a l'ADMIN. Un AGENT
+# travaille les dossiers, il ne definit pas pour qui l'organisation recouvre.
 @router.post("", response_model=ClientRead, status_code=status.HTTP_201_CREATED)
-async def create_client(data: ClientCreate, service: ClientServiceDep) -> ClientRead:
+async def create_client(data: ClientCreate, service: ClientServiceDep, _: CurrentAdminDep) -> ClientRead:
     client = await service.create_client(data)
     return ClientRead.model_validate(client)
 
@@ -36,5 +39,5 @@ async def update_client(client_id: int, data: ClientUpdate, service: ClientServi
 
 
 @router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_client(client_id: int, service: ClientServiceDep) -> None:
+async def delete_client(client_id: int, service: ClientServiceDep, _: CurrentAdminDep) -> None:
     await service.delete_client(client_id)
