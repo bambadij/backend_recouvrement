@@ -86,6 +86,25 @@ class CreanceService:
             raise NotFoundException(f"Creance {creance_id} introuvable")
         return creance
 
+    async def get_creance_par_reference(self, reference: str) -> Creance:
+        """Resolution par reference, pour les URLs lisibles du front.
+
+        La reference est unique PAR ORGANISATION, pas globalement : la portee du
+        depot est donc ce qui rend la resolution deterministe. Un super-admin,
+        sans organisation, verrait plusieurs candidats — d'ou le refus explicite
+        plutot qu'un premier resultat arbitraire.
+        """
+        if self.current_user.organisation_id is None:
+            raise NotFoundException(
+                "La resolution par reference demande une organisation : "
+                "une meme reference peut exister dans plusieurs d'entre elles"
+            )
+
+        creance = await self.repository.get_by_reference(reference, self.current_user.organisation_id)
+        if creance is None:
+            raise NotFoundException(f"Creance {reference} introuvable")
+        return creance
+
     async def list_creances(
         self, skip: int = 0, limit: int = 100, debiteur_id: int | None = None, statut: StatutCreance | None = None
     ) -> list[Creance]:

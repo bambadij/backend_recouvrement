@@ -31,6 +31,20 @@ async def list_creances(
     return [CreanceRead.model_validate(c) for c in creances]
 
 
+# Declaree AVANT /{creance_id} : sinon FastAPI tente d'abord de lire
+# « by-reference » comme un entier et renvoie 422 au lieu d'atteindre cette route.
+# La reference passe en query et non en segment d'URL : elle est libre a la
+# creation et peut contenir une barre oblique (« SOF/TRD/08/2025 »), qui couperait
+# le chemin en deux.
+@router.get("/by-reference", response_model=CreanceRead)
+async def get_creance_par_reference(
+    service: CreanceServiceDep, reference: str = Query(min_length=1, max_length=50)
+) -> CreanceRead:
+    """Resout une creance depuis sa reference, pour les URLs lisibles du front."""
+    creance = await service.get_creance_par_reference(reference)
+    return CreanceRead.model_validate(creance)
+
+
 @router.get("/{creance_id}", response_model=CreanceRead)
 async def get_creance(creance_id: int, service: CreanceServiceDep) -> CreanceRead:
     creance = await service.get_creance(creance_id)
