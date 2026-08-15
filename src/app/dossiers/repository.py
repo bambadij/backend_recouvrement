@@ -6,8 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.models import Client
 from app.creances.models import Creance
 from app.creanciers.models import Creancier
+from app.debiteurs.models import Debiteur
 from app.dossiers.models import Dossier, StatutDossier
 from app.dossiers.schemas import DossierCreate, DossierUpdate
+from app.promesses.models import Promesse
+from app.relances.models import Relance
 
 
 class DossierRepository:
@@ -35,6 +38,55 @@ class DossierRepository:
             select(Dossier).where(Dossier.reference == reference, Dossier.organisation_id == organisation_id)
         )
         return result.scalar_one_or_none()
+
+    async def lignes_creances(self, dossier_id: int) -> list[tuple]:
+        """Les creances du dossier, colonnes nues, pour en tirer les faits en Python.
+
+        Une seule requete plutot que six GROUP BY : un dossier porte des dizaines
+        de factures, pas des millions, et les regroupements — statut, tranche
+        d'anciennete, encours par debiteur — se calculent alors sur le meme
+        instantane. Deux requetes separees pourraient se contredire.
+        """
+        result = await self.db.execute(
+            select(
+                Creance.debiteur_id,
+                Creance.montant_initial,
+                Creance.montant_restant,
+                Creance.date_echeance,
+                Creance.statut,
+            ).where(Creance.dossier_id == dossier_id)
+        )
+        return list(result.all())
+
+    async def compter_relances(self, dossier_id: int) -> list[tuple]:
+        """Relances du dossier, groupees par canal et par statut."""
+        result = await self.db.execute(
+            select(Relance.type_relance, Relance.statut, func.count().label("nb"))
+            .where(Relance.dossier_id == dossier_id)
+            .group_by(Relance.type_relance, Relance.statut)
+        )
+        return list(result.all())
+
+    async def compter_promesses(self, dossier_id: int) -> list[tuple]:
+        """Engagements du dossier, groupes par statut."""
+        result = await self.db.execute(
+            select(Promesse.statut, func.count().label("nb"), func.coalesce(func.sum(Promesse.montant_promis), 0))
+            .where(Promesse.dossier_id == dossier_id)
+            .group_by(Promesse.statut)
+        )
+        return list(result.all())
+
+    async def noms_debiteurs(self, dossier_id: int) -> dict[int, str]:
+        result = await self.db.execute(
+            select(Debiteur.id, Debiteur.prenom, Debiteur.nom, Debiteur.entreprise)
+            .join(Creance, Creance.debiteur_id == Debiteur.id)
+            .where(Creance.dossier_id == dossier_id)
+            .distinct()
+        )
+        return {
+            id_: (entreprise or f"{prenom} {nom}".strip())
+            for id_, prenom, nom, entreprise in result.all()
+        }
 
     async def compter_creances(self, dossier_id: int) -> int:
         result = await self.db.execute(

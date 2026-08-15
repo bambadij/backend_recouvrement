@@ -2,7 +2,15 @@ from fastapi import APIRouter, Query, status
 
 from app.dossiers.dependencies import DossierServiceDep
 from app.dossiers.models import StatutDossier
-from app.dossiers.schemas import DossierCreate, DossierListItem, DossierRead, DossierUpdate
+from app.dossiers.schemas import (
+    AnalyseDossier,
+    DossierCreate,
+    DossierListItem,
+    DossierRead,
+    DossierUpdate,
+    FaitsDossier,
+)
+from app.ia.dependencies import AnalyseDossierIADep
 from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/dossiers", tags=["dossiers"])
@@ -45,3 +53,25 @@ async def update_dossier(dossier_id: int, data: DossierUpdate, service: DossierS
 @router.delete("/{dossier_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_dossier(dossier_id: int, service: DossierServiceDep, _: CurrentAdminDep) -> None:
     await service.delete_dossier(dossier_id)
+
+
+@router.get("/{dossier_id}/faits", response_model=FaitsDossier)
+async def faits_dossier(dossier_id: int, service: DossierServiceDep) -> FaitsDossier:
+    """L'etat chiffre du dossier. Lecture pure, aucun appel de modele."""
+    return await service.faits_dossier(dossier_id)
+
+
+@router.post("/{dossier_id}/analyse", response_model=AnalyseDossier)
+async def analyser_dossier(
+    dossier_id: int, service: DossierServiceDep, analyse_ia: AnalyseDossierIADep
+) -> AnalyseDossier:
+    """Analyse le dossier : synthese et actions priorisees.
+
+    POST et non GET : la passe appelle un modele et se paie. Comme les
+    recommandations du tableau de bord, elle se declenche a la demande et jamais
+    a l'affichage d'une liste.
+
+    Les faits sont renvoyes avec l'analyse : chaque action cite un chiffre, et
+    l'agent doit pouvoir le confronter.
+    """
+    return await service.analyser_dossier(dossier_id, analyse_ia)

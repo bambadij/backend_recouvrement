@@ -66,3 +66,67 @@ class DossierListItem(DossierRead):
     nb_debiteurs: int
     montant_initial: Decimal
     montant_restant: Decimal
+
+
+class EncoursDebiteur(BaseModel):
+    nom: str
+    nb_creances: int
+    montant_restant: Decimal
+    #: Jours de retard de sa facture la plus ancienne.
+    retard_max_jours: int
+
+
+class FaitsDossier(BaseModel):
+    """L'etat chiffre d'un dossier, calcule en Python.
+
+    Rien ici ne sort d'un modele de langage : ce sont des comptages, des sommes
+    et des soustractions de dates. Le modele lit ce bloc pour arbitrer, il ne le
+    produit pas — c'est ce qui l'empeche de contredire les chiffres affiches.
+    """
+
+    reference: str | None
+    client: str
+    creancier: str
+    type_dossier: TypeDossier
+    objectif: ObjectifDossier
+    statut: StatutDossier
+    date_reception: date
+    #: Jours ecoules depuis la remise du dossier par le client.
+    anciennete_jours: int
+
+    nb_creances: int
+    nb_debiteurs: int
+    montant_confie: Decimal
+    montant_restant: Decimal
+    montant_encaisse: Decimal
+    #: Part deja recouvree, en pourcent du montant confie.
+    taux_recouvrement: int
+
+    creances_par_statut: dict[str, int]
+    #: Encours par tranche d'anciennete : « a jour », « 1-30 j », « 31-60 j »…
+    balance_agee: dict[str, Decimal]
+    #: Encours par debiteur, du plus lourd au plus leger.
+    debiteurs: list[EncoursDebiteur]
+
+    relances_par_canal: dict[str, int]
+    relances_echouees: int
+    promesses: dict[str, int]
+
+
+class ActionDossier(BaseModel):
+    """Une action a mener, telle que le modele la formule."""
+
+    titre: str
+    action: str
+    #: Le chiffre qui la motive, repris des faits. Rend la recommandation verifiable.
+    fait_declencheur: str
+    urgence: str
+
+
+class AnalyseDossier(BaseModel):
+    """Lecture du dossier par le modele, accompagnee des faits qui la fondent."""
+
+    synthese: str
+    actions: list[ActionDossier]
+    faits: FaitsDossier
+    modele: str
