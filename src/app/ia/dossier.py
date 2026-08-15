@@ -40,6 +40,15 @@ Regles absolues :
 - Si le dossier est sain ou solde, dis-le, plutot que de fabriquer un probleme.
 - Pas de pourcentage de risque ni de score invente.
 - Ecris en francais, sobre, sans formule commerciale.
+
+Trois graphiques sont affiches a cote de ton texte. Ecris la legende de chacun
+dans « lectures » : une phrase, deux au plus, qui dit ce que la forme du graphe
+signifie pour le recouvrement — pas ce qu'elle montre, que l'agent voit deja.
+- anciennete : la balance agee, tranche par tranche.
+- debiteurs : l'encours de chaque debiteur.
+- engagements : les promesses tenues, attendues et rompues.
+Chaque legende cite un chiffre de SON graphique. Laisse la chaine vide quand le
+graphique correspondant n'a rien a montrer — aucune promesse, aucun impaye.
 """
 
 SCHEMA = {
@@ -60,8 +69,18 @@ SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "lectures": {
+            "type": "object",
+            "properties": {
+                "anciennete": {"type": "string"},
+                "debiteurs": {"type": "string"},
+                "engagements": {"type": "string"},
+            },
+            "required": ["anciennete", "debiteurs", "engagements"],
+            "additionalProperties": False,
+        },
     },
-    "required": ["synthese", "actions"],
+    "required": ["synthese", "actions", "lectures"],
     "additionalProperties": False,
 }
 
@@ -89,8 +108,8 @@ class AnalyseDossierIA:
         # convertir en float introduirait des arrondis sur des montants.
         return json.dumps(faits.model_dump(mode="json"), ensure_ascii=False, indent=1)
 
-    async def analyser(self, faits: FaitsDossier) -> tuple[str, list[dict], str]:
-        """Renvoie (synthese, actions, modele)."""
+    async def analyser(self, faits: FaitsDossier) -> tuple[str, list[dict], dict, str]:
+        """Renvoie (synthese, actions, lectures, modele)."""
         client = self._obtenir_client()
 
         try:
@@ -135,4 +154,9 @@ class AnalyseDossierIA:
         except json.JSONDecodeError as e:
             raise BadRequestException("Analyse illisible.") from e
 
-        return donnees.get("synthese", ""), donnees.get("actions", []), reponse.model
+        return (
+            donnees.get("synthese", ""),
+            donnees.get("actions", []),
+            donnees.get("lectures", {}),
+            reponse.model,
+        )

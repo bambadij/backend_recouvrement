@@ -10,7 +10,7 @@ from app.debiteurs.models import Debiteur
 from app.dossiers.models import Dossier, StatutDossier
 from app.dossiers.schemas import DossierCreate, DossierUpdate
 from app.promesses.models import Promesse
-from app.relances.models import Relance
+from app.relances.models import Relance, StatutRelance
 
 
 class DossierRepository:
@@ -68,11 +68,36 @@ class DossierRepository:
         return list(result.all())
 
     async def compter_promesses(self, dossier_id: int) -> list[tuple]:
-        """Engagements du dossier, groupes par statut."""
+        """Engagements du dossier, groupes par debiteur et par statut.
+
+        Le debiteur entre dans le regroupement parce que « deux promesses
+        rompues » sans dire par qui ne se traduit en aucune action : c'est le
+        debiteur qu'on rappelle, pas le dossier. Le total par statut se
+        reconstitue en Python a partir de ces lignes.
+        """
         result = await self.db.execute(
-            select(Promesse.statut, func.count().label("nb"), func.coalesce(func.sum(Promesse.montant_promis), 0))
+            select(
+                Promesse.debiteur_id,
+                Promesse.statut,
+                func.count().label("nb"),
+                func.coalesce(func.sum(Promesse.montant_promis), 0),
+            )
             .where(Promesse.dossier_id == dossier_id)
-            .group_by(Promesse.statut)
+            .group_by(Promesse.debiteur_id, Promesse.statut)
+        )
+        return list(result.all())
+
+    async def derniere_relance_par_debiteur(self, dossier_id: int) -> list[tuple]:
+        """Date de la derniere relance PARTIE, par debiteur.
+
+        Filtre sur ENVOYEE : une relance planifiee n'a pas ete emise, et la
+        compter reviendrait a dire au modele qu'on a relance quelqu'un qui n'a
+        rien recu. Les echecs sont exclus pour la meme raison.
+        """
+        result = await self.db.execute(
+            select(Relance.debiteur_id, func.max(Relance.date_relance))
+            .where(Relance.dossier_id == dossier_id, Relance.statut == StatutRelance.ENVOYEE)
+            .group_by(Relance.debiteur_id)
         )
         return list(result.all())
 

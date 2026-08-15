@@ -14,6 +14,7 @@ from app.dossiers.schemas import (
     DossierUpdate,
     EncoursDebiteur,
     FaitsDossier,
+    LecturesGraphiques,
 )
 from app.ia.dossier import AnalyseDossierIA
 from app.users.models import User
@@ -174,9 +175,14 @@ class DossierService:
             if statut_relance.value == "ECHOUEE":
                 echouees += nb
 
-        promesses = {
-            statut.value: nb for statut, nb, _ in await self.repository.compter_promesses(dossier_id)
-        }
+        promesses: dict[str, int] = {}
+        rompues_par_debiteur: dict[int, int] = {}
+        for debiteur_id, statut_promesse, nb, _ in await self.repository.compter_promesses(dossier_id):
+            promesses[statut_promesse.value] = promesses.get(statut_promesse.value, 0) + nb
+            if statut_promesse.value == "ROMPUE":
+                rompues_par_debiteur[debiteur_id] = rompues_par_debiteur.get(debiteur_id, 0) + nb
+
+        relance_par_debiteur = dict(await self.repository.derniere_relance_par_debiteur(dossier_id))
 
         debiteurs = sorted(
             (
@@ -185,6 +191,8 @@ class DossierService:
                     nb_creances=a["nb"],
                     montant_restant=a["restant"],
                     retard_max_jours=a["retard"],
+                    promesses_rompues=rompues_par_debiteur.get(debiteur_id, 0),
+                    derniere_relance=relance_par_debiteur.get(debiteur_id),
                 )
                 for debiteur_id, a in par_debiteur.items()
             ),
@@ -213,6 +221,7 @@ class DossierService:
             debiteurs=debiteurs,
             relances_par_canal=relances_par_canal,
             relances_echouees=echouees,
+            derniere_relance=max(relance_par_debiteur.values(), default=None),
             promesses=promesses,
         )
 
@@ -224,10 +233,11 @@ class DossierService:
         chiffre qui doit etre confrontable.
         """
         faits = await self.faits_dossier(dossier_id)
-        synthese, actions, modele = await analyse_ia.analyser(faits)
+        synthese, actions, lectures, modele = await analyse_ia.analyser(faits)
         return AnalyseDossier(
             synthese=synthese,
             actions=[ActionDossier(**a) for a in actions],
+            lectures=LecturesGraphiques(**lectures),
             faits=faits,
             modele=modele,
         )

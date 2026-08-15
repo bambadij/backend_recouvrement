@@ -74,6 +74,11 @@ class EncoursDebiteur(BaseModel):
     montant_restant: Decimal
     #: Jours de retard de sa facture la plus ancienne.
     retard_max_jours: int
+    #: Engagements non tenus. Un debiteur qui promet et ne paie pas ne se
+    #: retravaille pas comme un debiteur simplement silencieux.
+    promesses_rompues: int = 0
+    #: Derniere relance effectivement partie. Nul si on ne l'a jamais relance.
+    derniere_relance: date | None = None
 
 
 class FaitsDossier(BaseModel):
@@ -110,6 +115,8 @@ class FaitsDossier(BaseModel):
 
     relances_par_canal: dict[str, int]
     relances_echouees: int
+    #: Jour de la derniere relance partie, tous debiteurs confondus. Nul si aucune.
+    derniere_relance: date | None
     promesses: dict[str, int]
 
 
@@ -123,10 +130,27 @@ class ActionDossier(BaseModel):
     urgence: str
 
 
+class LecturesGraphiques(BaseModel):
+    """Une phrase de lecture par graphique affiche.
+
+    Ces legendes sont redigees et non figees : « la moitie de l'encours depasse
+    90 jours » est vrai d'un dossier et faux du suivant. Une legende ecrite en
+    dur finirait par mentir sous le graphe qu'elle pretend decrire.
+
+    Vide quand le graphe n'a rien a montrer — l'interface masque alors la ligne
+    plutot que d'afficher un commentaire de remplissage.
+    """
+
+    anciennete: str = ""
+    debiteurs: str = ""
+    engagements: str = ""
+
+
 class AnalyseDossier(BaseModel):
     """Lecture du dossier par le modele, accompagnee des faits qui la fondent."""
 
     synthese: str
     actions: list[ActionDossier]
+    lectures: LecturesGraphiques
     faits: FaitsDossier
     modele: str
