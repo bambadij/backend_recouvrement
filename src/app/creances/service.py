@@ -106,12 +106,18 @@ class CreanceService:
         return creance
 
     async def list_creances(
-        self, skip: int = 0, limit: int = 100, debiteur_id: int | None = None, statut: StatutCreance | None = None
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        debiteur_id: int | None = None,
+        dossier_id: int | None = None,
+        statut: StatutCreance | None = None,
     ) -> list[Creance]:
         return await self.repository.list(
             skip=skip,
             limit=limit,
             debiteur_id=debiteur_id,
+            dossier_id=dossier_id,
             statut=statut,
             organisation_id=self.current_user.organisation_id,
         )

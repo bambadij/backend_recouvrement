@@ -25,9 +25,13 @@ async def list_creances(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     debiteur_id: int | None = None,
+    #: Les factures d'une demande precise : c'est l'entree depuis la liste des dossiers.
+    dossier_id: int | None = None,
     statut: StatutCreance | None = None,
 ) -> list[CreanceRead]:
-    creances = await service.list_creances(skip=skip, limit=limit, debiteur_id=debiteur_id, statut=statut)
+    creances = await service.list_creances(
+        skip=skip, limit=limit, debiteur_id=debiteur_id, dossier_id=dossier_id, statut=statut
+    )
     return [CreanceRead.model_validate(c) for c in creances]
 
 

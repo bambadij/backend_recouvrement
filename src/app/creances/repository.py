@@ -79,6 +79,7 @@ class CreanceRepository:
         skip: int = 0,
         limit: int = 100,
         debiteur_id: int | None = None,
+        dossier_id: int | None = None,
         statut: StatutCreance | None = None,
         organisation_id: int | None = None,
     ) -> list[Creance]:
@@ -87,6 +88,8 @@ class CreanceRepository:
             query = query.where(self._portee(organisation_id))
         if debiteur_id is not None:
             query = query.where(Creance.debiteur_id == debiteur_id)
+        if dossier_id is not None:
+            query = query.where(Creance.dossier_id == dossier_id)
         if statut is not None:
             query = query.where(self._statut_effectif() == statut.value)
         query = query.order_by(Creance.id).offset(skip).limit(limit)
