@@ -5,10 +5,13 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select, true
+from sqlalchemy import Row, func, select, true
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.creances.models import Creance, StatutCreance
+from app.debiteurs.models import Debiteur
+from app.dossiers.models import Dossier
 from app.relances.models import Relance, StatutRelance
 from app.relances.schemas import RelanceCreate, RelanceUpdate
 
@@ -153,6 +156,96 @@ class RelanceRepository:
             if ecart > jours:
                 lignes.append((cid, ref, Decimal(montant), ecart, jamais))
         return lignes
+
+    async def couples_a_relancer(self, organisation_id: int | None) -> list[Row]:
+        """Les debiteurs ayant au moins une facture echue, groupes par dossier.
+
+        Une ligne = un debiteur dans un dossier, pas une facture : c'est l'unite
+        de la relance, et c'est ce qui evite d'envoyer trois messages a
+        quelqu'un qui doit trois factures.
+
+        Seules les factures DEJA echues comptent. Relancer sur une facture qui
+        n'est pas encore due n'est pas du recouvrement.
+
+        Le tri des criteres se fait ensuite en Python : les quatre files se
+        lisent sur ces memes colonnes, et les recalculer en base ferait quatre
+        requetes la ou une suffit.
+        """
+        result = await self.db.execute(
+            select(
+                Creance.dossier_id.label("dossier_id"),
+                Creance.debiteur_id.label("debiteur_id"),
+                Debiteur.nom.label("nom"),
+                Debiteur.prenom.label("prenom"),
+                Debiteur.entreprise.label("entreprise"),
+                Dossier.reference.label("dossier_reference"),
+                func.count().label("nb_factures"),
+                func.coalesce(func.sum(Creance.montant_restant), 0).label("montant_restant"),
+                func.min(Creance.date_echeance).label("plus_ancienne_echeance"),
+                # La facture la plus ancienne sert de point d'entree vers la page
+                # de detail. min(id) donnerait la premiere saisie, pas la plus
+                # vieille dette : l'ordre d'import n'est pas l'ordre des echeances.
+                func.array_agg(
+                    aggregate_order_by(Creance.id, Creance.date_echeance.asc())
+                ).label("creance_ids"),
+            )
+            .join(Debiteur, Debiteur.id == Creance.debiteur_id)
+            .join(Dossier, Dossier.id == Creance.dossier_id)
+            .where(
+                Creance.organisation_id == organisation_id
+                if organisation_id is not None
+                else true(),
+                Creance.statut.in_((StatutCreance.EN_COURS, StatutCreance.EN_RETARD)),
+                Creance.montant_restant > 0,
+                Creance.date_echeance < func.current_date(),
+            )
+            .group_by(
+                Creance.dossier_id,
+                Creance.debiteur_id,
+                Debiteur.nom,
+                Debiteur.prenom,
+                Debiteur.entreprise,
+                Dossier.reference,
+            )
+        )
+        return list(result.all())
+
+    async def derniere_relance_envoyee(self, organisation_id: int | None) -> dict[tuple[int, int], Row]:
+        """Pour chaque couple (dossier, debiteur), la derniere relance PARTIE.
+
+        Le filtre sur ENVOYEE est ce qui donne son sens a l'horloge « sans
+        reponse depuis N jours » : une relance planifiee n'a rien emis, et le
+        silence qui la suit ne dit rien du debiteur. Les echecs sont exclus pour
+        la meme raison.
+        """
+        result = await self.db.execute(
+            select(
+                Relance.dossier_id,
+                Relance.debiteur_id,
+                Relance.date_relance,
+                Relance.type_relance,
+                Relance.resultat,
+            )
+            .where(self._portee(organisation_id), Relance.statut == StatutRelance.ENVOYEE)
+            .order_by(Relance.dossier_id, Relance.debiteur_id, Relance.date_relance.desc())
+            .distinct(Relance.dossier_id, Relance.debiteur_id)
+        )
+        return {(row.dossier_id, row.debiteur_id): row for row in result.all()}
+
+    async def relances_planifiees(self, organisation_id: int | None) -> dict[tuple[int, int], int]:
+        """Pour chaque couple, l'identifiant d'une relance planifiee en attente.
+
+        La file s'en sert pour ne pas annoncer « jamais relance » a cote d'un
+        courrier deja pret, et pour offrir « marquer envoyee » sans repasser par
+        la page de detail.
+        """
+        result = await self.db.execute(
+            select(Relance.dossier_id, Relance.debiteur_id, Relance.id)
+            .where(self._portee(organisation_id), Relance.statut == StatutRelance.PLANIFIEE)
+            .order_by(Relance.dossier_id, Relance.debiteur_id, Relance.date_relance.asc())
+            .distinct(Relance.dossier_id, Relance.debiteur_id)
+        )
+        return {(row.dossier_id, row.debiteur_id): row.id for row in result.all()}
 
     async def count(self, organisation_id: int | None) -> int:
         result = await self.db.execute(

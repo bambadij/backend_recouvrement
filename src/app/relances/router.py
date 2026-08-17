@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, status
 
 from app.relances.dependencies import RelanceServiceDep
 from app.relances.models import StatutRelance
-from app.relances.schemas import RelanceCreate, RelanceRead, RelanceUpdate
+from app.relances.schemas import FileDeTravail, RelanceCreate, RelanceRead, RelanceUpdate
 from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/relances", tags=["relances"])
@@ -30,6 +30,20 @@ async def list_relances(
         skip=skip, limit=limit, dossier_id=dossier_id, debiteur_id=debiteur_id, statut=statut, avec_resultat=avec_resultat
     )
     return [RelanceRead.model_validate(r) for r in relances]
+
+
+# Declare avant « /{relance_id} » : sinon « a-faire » serait pris pour un
+# identifiant et la route repondrait 422.
+@router.get("/a-faire", response_model=FileDeTravail)
+async def file_de_travail(
+    service: RelanceServiceDep,
+    file: str | None = Query(
+        None, description="retard | jamais_relance | sans_reponse | gros_montant"
+    ),
+    limit: int = Query(100, ge=1, le=500),
+) -> FileDeTravail:
+    """Par quoi commencer aujourd'hui : les debiteurs a relancer, par critere."""
+    return await service.file_de_travail(file=file, limit=limit)
 
 
 @router.get("/{relance_id}", response_model=RelanceRead)
