@@ -124,6 +124,7 @@ class RelanceService:
                 montant_restant=Decimal(couple.montant_restant),
                 jours_retard=(aujourdhui - couple.plus_ancienne_echeance).days,
                 creance_id=couple.creance_ids[0],
+                creance_reference=couple.creance_references[0],
                 derniere_relance=derniere.date_relance if derniere else None,
                 derniere_relance_canal=derniere.type_relance if derniere else None,
                 derniere_relance_repondue=repondue,

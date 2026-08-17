@@ -188,6 +188,11 @@ class RelanceRepository:
                 func.array_agg(
                     aggregate_order_by(Creance.id, Creance.date_echeance.asc())
                 ).label("creance_ids"),
+                # La reference double l'identifiant parce que c'est elle que
+                # porte l'URL du detail : /creances/{reference}.
+                func.array_agg(
+                    aggregate_order_by(Creance.reference, Creance.date_echeance.asc())
+                ).label("creance_references"),
             )
             .join(Debiteur, Debiteur.id == Creance.debiteur_id)
             .join(Dossier, Dossier.id == Creance.dossier_id)

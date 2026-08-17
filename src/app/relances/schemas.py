@@ -16,7 +16,12 @@ class RelanceBase(BaseModel):
 
 
 class RelanceCreate(RelanceBase):
-    pass
+    #: PLANIFIEE par defaut : on prepare une relance avant de l'emettre.
+    #:
+    #: La file de travail, elle, enregistre APRES coup — l'agent vient
+    #: d'envoyer depuis son propre outil et le declare. Lui imposer de creer
+    #: puis de modifier ferait deux ecritures pour un seul geste.
+    statut: StatutRelance = StatutRelance.PLANIFIEE
 
 
 class RelanceUpdate(BaseModel):
@@ -55,6 +60,8 @@ class LigneARelancer(BaseModel):
     jours_retard: int
     #: La plus ancienne facture echue, point d'entree vers la page de detail.
     creance_id: int
+    #: Sa reference : c'est elle, et non l'identifiant, que porte l'URL du detail.
+    creance_reference: str
 
     #: Derniere relance PARTIE. Une relance planifiee n'a rien emis : la compter
     #: reviendrait a dire qu'on a relance quelqu'un qui n'a rien recu.
