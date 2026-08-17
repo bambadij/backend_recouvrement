@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, status
 
 from app.debiteurs.dependencies import DebiteurServiceDep
-from app.debiteurs.schemas import DebiteurCreate, DebiteurRead, DebiteurUpdate
+from app.debiteurs.schemas import DebiteurCreate, DebiteurRead, DebiteurUpdate, FaitsDebiteur
 from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/debiteurs", tags=["debiteurs"])
@@ -28,6 +28,16 @@ async def list_debiteurs(
 async def get_debiteur(debiteur_id: int, service: DebiteurServiceDep) -> DebiteurRead:
     debiteur = await service.get_debiteur(debiteur_id)
     return DebiteurRead.model_validate(debiteur)
+
+
+@router.get("/{debiteur_id}/faits", response_model=FaitsDebiteur)
+async def faits_debiteur(debiteur_id: int, service: DebiteurServiceDep) -> FaitsDebiteur:
+    """L'etat chiffre du debiteur : ses factures, ses delais, ses canaux.
+
+    Aucun appel de modele, donc gratuit : l'interface peut l'afficher a
+    l'ouverture d'une page sans rien declencher de facture.
+    """
+    return await service.faits_debiteur(debiteur_id)
 
 
 @router.patch("/{debiteur_id}", response_model=DebiteurRead)

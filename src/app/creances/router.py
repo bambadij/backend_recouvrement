@@ -1,11 +1,19 @@
+from datetime import date
+
 from fastapi import APIRouter, Query, status
 
 from app.creances.dependencies import CreanceServiceDep
 from app.creances.models import StatutCreance
 from app.creances.schemas import CreanceCreate, CreanceRead, CreanceUpdate
 from app.debiteurs.dependencies import DebiteurServiceDep
-from app.ia.dependencies import RedactionServiceDep
-from app.ia.schemas import MessageRelanceRequest, MessageRelanceResponse
+from app.debiteurs.schemas import FaitsDebiteur
+from app.ia.dependencies import AssistantIADep, RedactionServiceDep
+from app.ia.schemas import (
+    AssistantRequest,
+    AssistantResponse,
+    MessageRelanceRequest,
+    MessageRelanceResponse,
+)
 from app.organisations.dependencies import OrganisationServiceDep
 from app.relances.dependencies import RelanceServiceDep
 from app.users.dependencies import CurrentAdminDep, CurrentUserDep
@@ -100,3 +108,70 @@ async def rediger_message_relance(
         creance, debiteur, relances, data, current_user, organisation
     )
     return MessageRelanceResponse(message=message, modele=modele)
+
+
+#: Libelles des canaux dans les appuis affiches sous la reponse.
+_CANAUX = {
+    "EMAIL": "relances email",
+    "SMS": "SMS",
+    "WHATSAPP": "messages WhatsApp",
+    "APPEL": "appels",
+    "COURRIER": "courriers",
+    "MISE_EN_DEMEURE": "mises en demeure",
+}
+
+
+def _appuis(faits: FaitsDebiteur) -> list[str]:
+    """Ce sur quoi la reponse s'appuie, en clair.
+
+    Calcule ici et non par le modele : c'est precisement ce qui permet a l'agent
+    de verifier l'avis qu'il vient de lire. Un modele qui redigerait lui-meme la
+    liste de ses sources pourrait en inventer.
+    """
+    lignes = [f"{c.envoyees} {_CANAUX.get(c.canal, c.canal.lower())}" for c in faits.canaux]
+    if faits.nb_soldees:
+        lignes.append(f"{faits.nb_soldees} facture(s) soldee(s)")
+    rompues = faits.promesses.get("ROMPUE", 0)
+    if rompues:
+        lignes.append(f"{rompues} promesse(s) rompue(s)")
+    return lignes
+
+
+@router.post("/{creance_id}/assistant", response_model=AssistantResponse)
+async def interroger_assistant(
+    creance_id: int,
+    data: AssistantRequest,
+    service: CreanceServiceDep,
+    debiteur_service: DebiteurServiceDep,
+    assistant: AssistantIADep,
+) -> AssistantResponse:
+    """Repond a une question de l'agent sur cette creance.
+
+    L'autorisation est portee par la creance : get_creance verifie deja l'acces,
+    et faits_debiteur verifie l'organisation du debiteur.
+
+    Passe payante a chaque question, d'ou le POST : rien ne part a l'affichage.
+    """
+    creance = await service.get_creance(creance_id)
+    faits_debiteur = await debiteur_service.faits_debiteur(creance.debiteur_id)
+
+    # La facture regardee, plus l'histoire de celui qui la doit. Le modele a
+    # besoin des deux : le retard se lit sur la facture, le comportement sur le
+    # debiteur.
+    faits = {
+        "facture": {
+            "reference": creance.reference,
+            "montant_initial": str(creance.montant_initial),
+            "montant_restant": str(creance.montant_restant),
+            "date_echeance": creance.date_echeance.isoformat(),
+            "jours_retard": (date.today() - creance.date_echeance).days,
+            "statut": creance.statut.value,
+        },
+        "debiteur": faits_debiteur.model_dump(mode="json"),
+    }
+
+    echanges = [
+        {"role": tour.role, "content": tour.contenu} for tour in data.echanges
+    ]
+    reponse, modele = await assistant.repondre(faits, echanges)
+    return AssistantResponse(reponse=reponse, appuis=_appuis(faits_debiteur), modele=modele)

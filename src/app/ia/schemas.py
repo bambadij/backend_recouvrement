@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -14,4 +16,31 @@ class MessageRelanceRequest(BaseModel):
 class MessageRelanceResponse(BaseModel):
     message: str
     #: Modele ayant produit le texte, pour tracer ce qui a ete genere par quoi.
+    modele: str
+
+
+class TourAssistant(BaseModel):
+    """Un tour de la conversation, tel que l'interface le detient."""
+
+    role: Literal["user", "assistant"]
+    contenu: str = Field(min_length=1, max_length=4000)
+
+
+class AssistantRequest(BaseModel):
+    """Question posee a l'assistant sur une creance.
+
+    L'historique voyage avec la requete : rien n'est stocke cote serveur. Une
+    question de travail sur un dossier n'a pas a survivre a la fermeture du
+    panneau, et la conserver reviendrait a archiver des echanges internes sans
+    que personne l'ait demande.
+    """
+
+    echanges: list[TourAssistant] = Field(min_length=1, max_length=40)
+
+
+class AssistantResponse(BaseModel):
+    reponse: str
+    #: Ce sur quoi la reponse s'appuie, en clair : « 9 relances email, 4 appels ».
+    #: Calcule en Python, jamais par le modele — c'est ce qui rend l'avis verifiable.
+    appuis: list[str]
     modele: str
