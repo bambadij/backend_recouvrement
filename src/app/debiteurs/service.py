@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
@@ -8,6 +9,7 @@ from app.debiteurs.schemas import (
     DebiteurCreate,
     DebiteurUpdate,
     DelaiReglement,
+    FactureDebiteur,
     FaitsDebiteur,
 )
 from app.users.models import User
@@ -66,6 +68,7 @@ class DebiteurService:
         """
         debiteur = await self.get_debiteur(debiteur_id)
         lignes = await self.repository.lignes_creances(debiteur_id)
+        aujourdhui = date.today()
 
         soldees = [ligne for ligne in lignes if ligne.statut.value == "SOLDEE"]
         dates_solde = await self.repository.dates_solde([ligne.id for ligne in soldees])
@@ -108,6 +111,21 @@ class DebiteurService:
             Decimal(0),
         )
 
+        factures = sorted(
+            (
+                FactureDebiteur(
+                    reference=ligne.reference,
+                    montant_initial=ligne.montant_initial,
+                    montant_restant=ligne.montant_restant,
+                    statut=ligne.statut.value,
+                    date_echeance=ligne.date_echeance,
+                    jours_retard=(aujourdhui - ligne.date_echeance).days,
+                )
+                for ligne in lignes
+            ),
+            key=lambda f: f.date_echeance,
+        )
+
         return FaitsDebiteur(
             nom=f"{debiteur.prenom} {debiteur.nom}".strip(),
             entreprise=debiteur.entreprise,
@@ -119,6 +137,7 @@ class DebiteurService:
             nb_creances=len(lignes),
             nb_soldees=len(soldees),
             encours_total=encours,
+            factures=factures,
             canaux=canaux,
             reponses_tracees=reponses > 0,
             delais=delais,

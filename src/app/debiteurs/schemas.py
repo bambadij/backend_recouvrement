@@ -61,6 +61,23 @@ class DelaiReglement(BaseModel):
     jours: int
 
 
+class FactureDebiteur(BaseModel):
+    """Une facture de ce debiteur, avec ce qui en a deja ete regle.
+
+    Le seul graphique qui a des donnees des la premiere facture : les delais de
+    reglement demandent une facture soldee, les promesses un engagement obtenu,
+    le taux de reponse un champ que personne ne remplit toujours.
+    """
+
+    reference: str
+    montant_initial: Decimal
+    montant_restant: Decimal
+    statut: str
+    date_echeance: date
+    #: Negatif tant que l'echeance est a venir.
+    jours_retard: int
+
+
 class FaitsDebiteur(BaseModel):
     """L'etat chiffre d'un debiteur, toutes ses factures confondues.
 
@@ -79,6 +96,8 @@ class FaitsDebiteur(BaseModel):
     nb_creances: int
     nb_soldees: int
     encours_total: Decimal
+    #: Ses factures, de la plus ancienne echeance a la plus recente.
+    factures: list[FactureDebiteur]
 
     canaux: list[CanalDebiteur]
     #: Vrai des qu'au moins une relance porte un resultat.

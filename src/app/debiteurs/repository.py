@@ -120,6 +120,7 @@ class DebiteurRepository:
             select(
                 Creance.id,
                 Creance.reference,
+                Creance.montant_initial,
                 Creance.montant_restant,
                 Creance.date_echeance,
                 # Les deux : date_facture dit quand la facture a ete emise,
