@@ -67,12 +67,12 @@ class DebiteurService:
         debiteur = await self.get_debiteur(debiteur_id)
         lignes = await self.repository.lignes_creances(debiteur_id)
 
-        soldees = [ligne for ligne in lignes if ligne[5].value == "SOLDEE"]
-        dates_solde = await self.repository.dates_solde([ligne[0] for ligne in soldees])
+        soldees = [ligne for ligne in lignes if ligne.statut.value == "SOLDEE"]
+        dates_solde = await self.repository.dates_solde([ligne.id for ligne in soldees])
 
         delais = []
-        for creance_id, reference, _restant, echeance, _saisie, _statut in soldees:
-            date_solde = dates_solde.get(creance_id)
+        for ligne in soldees:
+            date_solde = dates_solde.get(ligne.id)
             # Une facture soldee sans aucun paiement enregistre existe : statut
             # bascule a la main, remise gracieuse, ecriture passee ailleurs. On
             # ne peut pas en tirer de delai, on la laisse de cote plutot que
@@ -81,10 +81,10 @@ class DebiteurService:
                 continue
             delais.append(
                 DelaiReglement(
-                    reference=reference,
-                    date_echeance=echeance,
+                    reference=ligne.reference,
+                    date_echeance=ligne.date_echeance,
                     date_solde=date_solde,
-                    jours=(date_solde - echeance).days,
+                    jours=(date_solde - ligne.date_echeance).days,
                 )
             )
         delais.sort(key=lambda d: d.date_solde)
@@ -104,14 +104,18 @@ class DebiteurService:
 
         # Encours : les creances annulees ne sont plus dues, les soldees valent zero.
         encours = sum(
-            (ligne[2] for ligne in lignes if ligne[5].value not in ("SOLDEE", "ANNULEE")),
+            (ligne.montant_restant for ligne in lignes if ligne.statut.value not in ("SOLDEE", "ANNULEE")),
             Decimal(0),
         )
 
         return FaitsDebiteur(
             nom=f"{debiteur.prenom} {debiteur.nom}".strip(),
             entreprise=debiteur.entreprise,
-            premiere_creance=min((ligne[4] for ligne in lignes), default=None),
+            # La date d'emission fait foi ; la date de saisie ne sert que de
+            # repli sur les lignes anterieures a ce champ.
+            premiere_creance=min(
+                (ligne.date_facture or ligne.date_saisie for ligne in lignes), default=None
+            ),
             nb_creances=len(lignes),
             nb_soldees=len(soldees),
             encours_total=encours,

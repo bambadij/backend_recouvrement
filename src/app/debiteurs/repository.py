@@ -122,6 +122,12 @@ class DebiteurRepository:
                 Creance.reference,
                 Creance.montant_restant,
                 Creance.date_echeance,
+                # Les deux : date_facture dit quand la facture a ete emise,
+                # date_saisie quand la ligne est entree dans l'outil. Sur un
+                # portefeuille importe, la seconde vaut le jour de l'import —
+                # « client depuis » calcule dessus affiche le mois courant pour
+                # tout le monde.
+                Creance.date_facture,
                 Creance.date_saisie,
                 Creance.statut,
             ).where(Creance.debiteur_id == debiteur_id)
