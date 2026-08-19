@@ -50,6 +50,38 @@ reagi. Si « reponses_tracees » est faux, personne ne remplit ce champ dans ce
 cabinet : ne conclus alors rien sur les canaux qui marchent ou pas.
 """
 
+#: Ouverture de la conversation cote creance.
+ENTETE_CREANCE = "Voici l'etat de cette facture et de son debiteur."
+
+SYSTEM_PORTEFEUILLE = """Tu assistes un responsable de recouvrement senegalais qui
+regarde le tableau de bord de son portefeuille.
+
+On te fournit ce que l'application a calcule : balance agee par tranche
+d'anciennete, indicateurs d'efficacite, principaux debiteurs, activite des
+agents, alertes deterministes.
+
+Regles absolues :
+- N'utilise que les chiffres fournis. N'en recalcule aucun, n'en invente aucun.
+- Trois paragraphes courts au maximum, puis ce qu'il faut faire cette semaine.
+- Appuie chaque affirmation sur un fait transmis, en citant son chiffre.
+- Quand une donnee manque, dis-le plutot que de combler. Un portefeuille jeune
+  n'a ni historique mensuel ni promesses : « je ne peux rien dire de la
+  tendance » est la bonne reponse, pas une extrapolation.
+- Pas de score, pas de projection chiffree, pas de pourcentage invente.
+- Ecris en francais, sobre, sans formule commerciale.
+
+Deux pieges de lecture a connaitre :
+- Le DSO estime rapporte l'encours au flux confie sur la fenetre : il monte
+  quand on confie davantage, meme sans perte d'efficacite. L'ecart avec le
+  delai reellement constate se lit ainsi, et non comme une contradiction.
+- Le champ « resultat » d'une relance n'est rempli que lorsque le debiteur a
+  reagi. Un taux de retour a zero peut signifier que personne ne remplit ce
+  champ : ne conclus alors rien sur les canaux.
+"""
+
+#: Ouverture de la conversation cote portefeuille.
+ENTETE_PORTEFEUILLE = "Voici l'etat chiffre du portefeuille, tel que l'application le calcule."
+
 
 class AssistantIA:
     def __init__(self) -> None:
@@ -68,7 +100,14 @@ class AssistantIA:
             self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         return self._client
 
-    async def repondre(self, faits: dict, echanges: list[dict]) -> tuple[str, str]:
+    async def repondre(
+        self,
+        faits: dict,
+        echanges: list[dict],
+        *,
+        system: str = SYSTEM,
+        entete: str = ENTETE_CREANCE,
+    ) -> tuple[str, str]:
         """Renvoie (reponse, modele).
 
         `echanges` est la conversation telle que l'interface la detient : c'est
@@ -76,6 +115,10 @@ class AssistantIA:
         question posee sur un dossier n'a pas a survivre a la fermeture du
         panneau, et la conserver reviendrait a archiver des echanges de travail
         sans que personne l'ait demande.
+
+        `system` et `entete` changent selon l'echelle de la question — une
+        facture ou le portefeuille entier. Le reste est identique : memes
+        garde-fous, meme appel, meme refus de produire un chiffre.
         """
         client = self._obtenir_client()
 
@@ -88,10 +131,7 @@ class AssistantIA:
         messages = [
             {
                 "role": "user",
-                "content": (
-                    "Voici l'etat de cette facture et de son debiteur.\n\n"
-                    + json.dumps(faits, ensure_ascii=False, indent=1)
-                ),
+                "content": entete + "\n\n" + json.dumps(faits, ensure_ascii=False, indent=1),
             },
             {"role": "assistant", "content": "J'ai lu le dossier. Que voulez-vous savoir ?"},
             *echanges[-MAX_TOURS:],
@@ -102,7 +142,7 @@ class AssistantIA:
                 model=settings.anthropic_model,
                 max_tokens=MAX_TOKENS,
                 output_config={"effort": "medium"},
-                system=SYSTEM,
+                system=system,
                 messages=messages,
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
