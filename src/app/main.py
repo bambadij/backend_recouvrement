@@ -16,6 +16,8 @@ from app.creanciers import models as creanciers_models  # noqa: F401
 from app.creanciers.router import router as creanciers_router
 from app.debiteurs import models as debiteurs_models  # noqa: F401
 from app.debiteurs.router import router as debiteurs_router
+from app.documents import models as documents_models  # noqa: F401
+from app.documents.router import router as documents_router
 from app.dossiers import models as dossiers_models  # noqa: F401
 from app.dossiers.router import router as dossiers_router
 from app.imports.router import router as imports_router
@@ -70,6 +72,7 @@ app.include_router(paiements_router)
 app.include_router(relances_router)
 app.include_router(promesses_router)
 app.include_router(segmentation_router)
+app.include_router(documents_router)
 app.include_router(imports_router)
 
 
