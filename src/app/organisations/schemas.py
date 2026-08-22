@@ -212,6 +212,30 @@ class RecommandationsResponse(BaseModel):
     modele: str
 
 
+class JourActivite(BaseModel):
+    """Ce qu'un agent a saisi un jour donne."""
+
+    jour: date
+    montant: Decimal
+    nb_paiements: int
+
+
+class MonActivite(BaseModel):
+    """La semaine d'un agent, jour par jour.
+
+    Sert la page « Mon espace » : un cumul sur trois mois ne dit pas si la
+    semaine a ete active, il masque autant les journees pleines que les creuses.
+
+    Comme partout ailleurs, `saisi_par_nom` dit qui a ENREGISTRE le versement,
+    pas qui l'a obtenu — le libelle cote interface doit rester exact.
+    """
+
+    agent: str
+    #: Un point par jour, du plus ancien au plus recent, jours vides compris.
+    jours: list[JourActivite]
+    total: Decimal
+
+
 class OrganisationStats(BaseModel):
     #: None sur la vue plateforme, qui agrege toutes les organisations.
     organisation_id: int | None

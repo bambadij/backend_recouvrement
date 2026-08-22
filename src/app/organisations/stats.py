@@ -12,8 +12,10 @@ from app.organisations.schemas import (
     RecouvrementCompare,
     SerieRecouvrement,
     Efficacite,
+    JourActivite,
     LigneClassement,
     LigneProductivite,
+    MonActivite,
     MontantParMois,
     OrganisationStats,
     PointBalanceAgee,
@@ -215,6 +217,30 @@ class OrganisationStatsService:
             Decimal(0),
         )
         return pondere / total
+
+    async def mon_activite(
+        self, organisation_id: int | None, nom_agent: str, jours: int = 7
+    ) -> MonActivite:
+        """La semaine d'un agent, jour par jour, jours creux compris.
+
+        L'axe est construit ici et non en base : un jour sans encaissement n'a
+        pas de ligne, et une serie trouee se lirait comme une semaine plus
+        courte. C'est justement le jour vide qui porte l'information.
+        """
+        par_jour = await self.paiement_repository.encaissements_par_jour(
+            organisation_id, nom_agent, jours
+        )
+        aujourdhui = date.today()
+        axe = [aujourdhui - timedelta(days=n) for n in range(jours - 1, -1, -1)]
+
+        points = []
+        total = Decimal(0)
+        for jour in axe:
+            montant, nb = par_jour.get(jour, (Decimal(0), 0))
+            total += montant
+            points.append(JourActivite(jour=jour, montant=montant, nb_paiements=nb))
+
+        return MonActivite(agent=nom_agent, jours=points, total=total)
 
     def _previsions(
         self,

@@ -8,7 +8,7 @@ from app.ia.dependencies import AssistantIADep
 from app.ia.recommandations import RecommandationsIA, get_recommandations_ia
 from app.ia.schemas import AssistantRequest, AssistantResponse
 from app.organisations.dependencies import OrganisationServiceDep, OrganisationStatsServiceDep
-from app.organisations.schemas import ApercuOrganisation, OrganisationCreate, RecommandationsResponse, RecouvrementCompare, OrganisationRead, OrganisationStats, OrganisationUpdate
+from app.organisations.schemas import ApercuOrganisation, MonActivite, OrganisationCreate, RecommandationsResponse, RecouvrementCompare, OrganisationRead, OrganisationStats, OrganisationUpdate
 from app.users.dependencies import CurrentSuperAdminDep, CurrentUserDep
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
@@ -52,6 +52,24 @@ async def get_my_organisation_stats(
     if current_user.organisation_id is None:
         raise NotFoundException("Le SUPER_ADMIN n'appartient a aucune organisation")
     return await service.get_stats(current_user.organisation_id, periode_jours)
+
+
+@router.get("/me/mon-activite", response_model=MonActivite)
+async def mon_activite(
+    current_user: CurrentUserDep,
+    service: OrganisationStatsServiceDep,
+    jours: int = Query(7, ge=2, le=31, description="Nombre de jours de la ventilation"),
+) -> MonActivite:
+    """Ce que l'utilisateur connecte a saisi, jour par jour.
+
+    Le nom vient du jeton, jamais d'un parametre : sans cela, n'importe qui
+    lirait l'activite de n'importe quel collegue en changeant l'URL.
+    """
+    if current_user.organisation_id is None:
+        raise NotFoundException("Le SUPER_ADMIN n'appartient a aucune organisation")
+
+    nom = f"{current_user.prenom} {current_user.nom}".strip()
+    return await service.mon_activite(current_user.organisation_id, nom, jours)
 
 
 @router.post("/me/recommandations", response_model=RecommandationsResponse)

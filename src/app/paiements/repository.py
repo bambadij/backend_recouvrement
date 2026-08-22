@@ -118,6 +118,36 @@ class PaiementRepository:
         )
         return [(n, Decimal(montant), nb) for n, montant, nb in result.all()]
 
+    async def encaissements_par_jour(
+        self, organisation_id: int | None, nom_agent: str, jours: int
+    ) -> dict[date, tuple[Decimal, int]]:
+        """Ce qu'un agent a saisi jour par jour, sur les `jours` derniers jours.
+
+        Un cumul sur trois mois ne dit pas si la semaine a ete active : il masque
+        autant les journees pleines que les journees creuses. La ventilation, elle,
+        donne une trajectoire — c'est ce qui fait revenir sur la page.
+
+        Meme reserve que `encaissements_par_utilisateur` : `saisi_par_nom` dit qui
+        a ENREGISTRE le versement, pas qui l'a obtenu.
+
+        Les jours sans encaissement sont absents du resultat plutot que nuls :
+        c'est a l'appelant de construire son axe, lui seul sait ou il commence.
+        """
+        result = await self.db.execute(
+            select(
+                Paiement.date_paiement,
+                func.sum(Paiement.montant),
+                func.count(),
+            )
+            .where(
+                self._portee(organisation_id),
+                Paiement.saisi_par_nom == nom_agent,
+                Paiement.date_paiement >= func.current_date() - jours,
+            )
+            .group_by(Paiement.date_paiement)
+        )
+        return {jour: (Decimal(montant), nb) for jour, montant, nb in result.all()}
+
     async def delai_moyen_encaissement(self, organisation_id: int | None, periode_jours: int) -> int | None:
         """Jours écoulés entre l'échéance et l'encaissement, pondérés par les montants.
 
