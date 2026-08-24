@@ -13,6 +13,8 @@ from app.relances.schemas import (
     RelanceCreate,
     RelanceUpdate,
 )
+from app.segmentation.models import RANG_POTENTIEL
+from app.segmentation.repository import SegmentationRepository
 from app.users.models import User
 
 
@@ -43,11 +45,16 @@ class RelanceService:
         repository: RelanceRepository,
         dossier_service: DossierService,
         debiteur_service: DebiteurService,
+        segmentation_repository: SegmentationRepository,
         current_user: User,
     ) -> None:
         self.repository = repository
         self.dossier_service = dossier_service
         self.debiteur_service = debiteur_service
+        # Le depot, pas le service : on ne fait que LIRE un classement deja
+        # calcule. Passer par le service de segmentation exposerait ici la passe
+        # payante, dans un ecran ou personne ne doit pouvoir la declencher.
+        self.segmentation_repository = segmentation_repository
         self.current_user = current_user
 
     def _writable_organisation_id(self) -> int:
@@ -90,7 +97,9 @@ class RelanceService:
             avec_resultat=avec_resultat,
         )
 
-    async def file_de_travail(self, file: str | None = None, limit: int = 100) -> FileDeTravail:
+    async def file_de_travail(
+        self, file: str | None = None, limit: int = 100, tri: str | None = None
+    ) -> FileDeTravail:
         """La file de travail du jour : par quoi commencer, et pourquoi.
 
         Quatre criteres, tous calcules sur le meme jeu de lignes. Ils se
@@ -107,6 +116,9 @@ class RelanceService:
         couples = await self.repository.couples_a_relancer(organisation_id)
         dernieres = await self.repository.derniere_relance_envoyee(organisation_id)
         planifiees = await self.repository.relances_planifiees(organisation_id)
+        # Le classement, quand il existe. Une lecture en base, aucun appel de
+        # modele : la file s'affiche a la meme vitesse qu'avant.
+        classement = await self.segmentation_repository.classement_par_couple(organisation_id)
         aujourdhui = date.today()
 
         lignes: list[LigneARelancer] = []
@@ -114,6 +126,7 @@ class RelanceService:
             cle = (couple.dossier_id, couple.debiteur_id)
             derniere = dernieres.get(cle)
             repondue = bool(derniere is not None and (derniere.resultat or "").strip())
+            classe = classement.get(cle)
             ligne = LigneARelancer(
                 dossier_id=couple.dossier_id,
                 dossier_reference=couple.dossier_reference,
@@ -129,6 +142,10 @@ class RelanceService:
                 derniere_relance_canal=derniere.type_relance if derniere else None,
                 derniere_relance_repondue=repondue,
                 relance_planifiee_id=planifiees.get(cle),
+                segment=classe[0].segment if classe else None,
+                potentiel=classe[0].potentiel if classe else None,
+                justification=classe[0].justification if classe else None,
+                creance_classee_reference=classe[1].reference if classe else None,
             )
             lignes.append(ligne)
 
@@ -145,14 +162,42 @@ class RelanceService:
         ]
 
         active = file if file in self._LIBELLES else next(iter(self._LIBELLES))
-        # Les plus gros montants d'abord : a temps de traitement egal, c'est la
-        # ou l'heure de l'agent rapporte le plus.
-        retenues = sorted(
-            (ligne for ligne, f in zip(lignes, appartenances) if active in f),
-            key=lambda ligne: ligne.montant_restant,
-            reverse=True,
+        dans_la_file = [ligne for ligne, f in zip(lignes, appartenances) if active in f]
+
+        # Le classement quand il existe, le montant sinon — ou sur demande. Un
+        # ecran qui n'afficherait rien tant qu'aucune passe n'a tourne serait un
+        # ecran de travail rendu inutilisable par une fonction facultative.
+        classees = [ligne for ligne in dans_la_file if ligne.potentiel is not None]
+        tri_actif = "montant" if tri == "montant" or not classees else "classement"
+
+        if tri_actif == "classement":
+            # Meme regle que la page de classement : d'abord ce qui a le plus de
+            # chances d'aboutir, le montant tranchant a potentiel egal. Deux
+            # ordres differents pour la meme question finiraient par se
+            # contredire sous les yeux de l'agent.
+            retenues = sorted(
+                dans_la_file,
+                key=lambda ligne: (
+                    ligne.potentiel is None,
+                    RANG_POTENTIEL.get(ligne.potentiel, 99),
+                    -ligne.montant_restant,
+                ),
+            )
+        else:
+            # Les plus gros montants d'abord : a temps de traitement egal, c'est
+            # la ou l'heure de l'agent rapporte le plus.
+            retenues = sorted(dans_la_file, key=lambda ligne: ligne.montant_restant, reverse=True)
+
+        return FileDeTravail(
+            file_active=active,
+            files=files,
+            lignes=retenues[:limit],
+            tri_actif=tri_actif,
+            classement_calcule_le=max(
+                (c[0].calcule_le for c in classement.values()), default=None
+            ),
+            non_classees=sum(1 for ligne in dans_la_file if ligne.potentiel is None),
         )
-        return FileDeTravail(file_active=active, files=files, lignes=retenues[:limit])
 
     def _seuil_gros_montants(self, lignes: list[LigneARelancer]) -> Decimal | None:
         """Montant a partir duquel une ligne compte parmi « les plus gros ».

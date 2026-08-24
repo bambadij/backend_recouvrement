@@ -4,6 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.relances.models import StatutRelance, TypeRelance
+from app.segmentation.models import PotentielRecouvrement, SegmentRisque
 
 
 class RelanceBase(BaseModel):
@@ -75,6 +76,19 @@ class LigneARelancer(BaseModel):
     #: l'agent en creerait une seconde.
     relance_planifiee_id: int | None
 
+    # --- Classement, quand il a ete calcule ---------------------------------
+    #
+    # Nuls tant qu'aucune passe de segmentation n'a tourne. La file reste alors
+    # exactement celle d'avant : ces champs ajoutent un ordre et une explication,
+    # ils ne conditionnent rien.
+    segment: SegmentRisque | None = None
+    potentiel: PotentielRecouvrement | None = None
+    #: Pourquoi ce rang, dans les mots du modele. Porte sur la creance elue.
+    justification: str | None = None
+    #: La creance qui a decide du rang du debiteur — pire segment, puis plus gros
+    #: montant. C'est d'elle que parle la justification.
+    creance_classee_reference: str | None = None
+
 
 class FileDeTravail(BaseModel):
     """La file du jour : les criteres disponibles, et les lignes de l'un d'eux."""
@@ -82,6 +96,15 @@ class FileDeTravail(BaseModel):
     file_active: str
     files: list[FileDisponible]
     lignes: list[LigneARelancer]
+
+    #: « classement » ou « montant ». Le classement quand il existe, sinon le
+    #: montant — l'ecran ne depend jamais d'une passe de modele.
+    tri_actif: str
+    #: Quand la derniere passe a tourne. Nul si aucune. Rendu a tous les roles :
+    #: un agent ne declenche pas le classement mais doit savoir s'il est frais.
+    classement_calcule_le: datetime | None = None
+    #: Lignes de cette file qui n'ont pas encore ete classees.
+    non_classees: int = 0
 
 
 class RelanceRead(BaseModel):

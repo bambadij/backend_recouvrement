@@ -41,9 +41,15 @@ async def file_de_travail(
         None, description="retard | jamais_relance | sans_reponse | gros_montant"
     ),
     limit: int = Query(100, ge=1, le=500),
+    tri: str | None = Query(None, description="classement | montant"),
 ) -> FileDeTravail:
-    """Par quoi commencer aujourd'hui : les debiteurs a relancer, par critere."""
-    return await service.file_de_travail(file=file, limit=limit)
+    """Par quoi commencer aujourd'hui : les debiteurs a relancer, par critere.
+
+    Lecture pure, y compris pour le classement : celui-ci est lu en base tel
+    qu'une passe l'a laisse. Aucun appel de modele n'est declenche ici, quel que
+    soit le role de l'appelant.
+    """
+    return await service.file_de_travail(file=file, limit=limit, tri=tri)
 
 
 @router.get("/{relance_id}", response_model=RelanceRead)

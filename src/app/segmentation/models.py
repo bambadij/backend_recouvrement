@@ -38,6 +38,21 @@ class PotentielRecouvrement(str, enum.Enum):
     FAIBLE = "FAIBLE"
 
 
+#: Ordre de traitement : d'abord ce qui a le plus de chances d'aboutir. A
+#: potentiel egal, le montant restant tranche. C'est ce tri, et non le risque,
+#: qui repond a « travailler en priorite sur les dossiers les plus rentables » :
+#: un dossier critique est souvent celui ou l'effort rapporte le moins.
+#:
+#: Pose ici, au plus pres de l'enum, parce que deux ecrans s'en servent — la
+#: page de classement et la file de relance. Duplique, il finirait par diverger
+#: et les deux listes se contrediraient sous les yeux de l'agent.
+RANG_POTENTIEL = {
+    PotentielRecouvrement.FORT: 0,
+    PotentielRecouvrement.MOYEN: 1,
+    PotentielRecouvrement.FAIBLE: 2,
+}
+
+
 class Segmentation(Base):
     __tablename__ = "segmentations"
     # Une seule segmentation courante par creance : le recalcul ecrase la precedente.

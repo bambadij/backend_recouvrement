@@ -2,7 +2,7 @@ from collections import Counter
 
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.ia.segmentation import ClassificationIA
-from app.segmentation.models import PotentielRecouvrement, Segmentation
+from app.segmentation.models import RANG_POTENTIEL, Segmentation
 from app.segmentation.repository import SegmentationRepository
 from app.segmentation.schemas import (
     DossierSegmente,
@@ -12,15 +12,6 @@ from app.segmentation.schemas import (
 )
 from app.users.models import User
 
-#: Ordre de traitement : d'abord ce qui a le plus de chances d'aboutir. A
-#: potentiel egal, le montant restant tranche. C'est ce tri, et non le risque,
-#: qui repond a « travailler en priorite sur les dossiers les plus rentables » :
-#: un dossier critique est souvent celui ou l'effort rapporte le moins.
-_RANG_POTENTIEL = {
-    PotentielRecouvrement.FORT: 0,
-    PotentielRecouvrement.MOYEN: 1,
-    PotentielRecouvrement.FAIBLE: 2,
-}
 
 
 class SegmentationService:
@@ -128,7 +119,7 @@ class SegmentationService:
             for segmentation, creance, debiteur in lignes
         ]
 
-        dossiers.sort(key=lambda d: (_RANG_POTENTIEL[d.potentiel], -d.montant_restant))
+        dossiers.sort(key=lambda d: (RANG_POTENTIEL[d.potentiel], -d.montant_restant))
         for rang, dossier in enumerate(dossiers, start=1):
             dossier.rang = rang
         return dossiers

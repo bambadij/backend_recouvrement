@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query
 
 from app.segmentation.dependencies import SegmentationServiceDep
+from app.users.dependencies import CurrentAdminDep
 from app.segmentation.schemas import (
     DossierSegmente,
     SegmentationRead,
@@ -13,12 +14,16 @@ router = APIRouter(prefix="/segmentation", tags=["segmentation"])
 
 @router.post("/run", response_model=SegmentationRunResult)
 async def lancer_segmentation(
-    data: SegmentationRequest, service: SegmentationServiceDep
+    data: SegmentationRequest, service: SegmentationServiceDep, _admin: CurrentAdminDep
 ) -> SegmentationRunResult:
-    """Classe les dossiers actifs et enregistre le resultat.
+    """Classe les creances actives et enregistre le resultat.
 
     Passe couteuse (un appel de modele par lot de 25) : a declencher a la demande
     ou sur planification, pas a chaque affichage de liste.
+
+    Reservee aux administrateurs. Un agent n'a aucune raison de relancer un
+    classement — il a toutes les raisons de savoir s'il est frais, et la date de
+    calcul lui est rendue par /relances/a-faire sans qu'il puisse la declencher.
     """
     return await service.lancer(data)
 

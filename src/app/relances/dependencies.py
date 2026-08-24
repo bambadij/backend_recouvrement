@@ -10,6 +10,7 @@ from app.dossiers.dependencies import get_dossier_service
 from app.dossiers.service import DossierService
 from app.relances.repository import RelanceRepository
 from app.relances.service import RelanceService
+from app.segmentation.repository import SegmentationRepository
 from app.users.dependencies import CurrentUserDep
 
 
@@ -19,7 +20,13 @@ def get_relance_service(
     debiteur_service: Annotated[DebiteurService, Depends(get_debiteur_service)],
     current_user: CurrentUserDep,
 ) -> RelanceService:
-    return RelanceService(RelanceRepository(db), dossier_service, debiteur_service, current_user)
+    return RelanceService(
+        RelanceRepository(db),
+        dossier_service,
+        debiteur_service,
+        SegmentationRepository(db),
+        current_user,
+    )
 
 
 RelanceServiceDep = Annotated[RelanceService, Depends(get_relance_service)]

@@ -9,12 +9,21 @@ from app.creances.models import Creance, StatutCreance
 from app.paiements.models import Paiement
 from app.promesses.models import Promesse, StatutPromesse
 from app.relances.models import Relance, StatutRelance
-from app.segmentation.models import Segmentation
+from app.segmentation.models import Segmentation, SegmentRisque
 from app.segmentation.schemas import FaitsDossier
 
 #: Un dossier soldee ou annulee n'a plus rien a recouvrer : le classer serait du
 #: bruit dans la file de travail, et de l'appel de modele paye pour rien.
 STATUTS_ACTIFS = (StatutCreance.EN_COURS, StatutCreance.EN_RETARD, StatutCreance.LITIGE)
+
+#: Gravite croissante. Sert a elire, parmi les creances d'un meme debiteur,
+#: celle qui le represente dans la file de relance.
+RANG_SEGMENT = {
+    SegmentRisque.FAIBLE: 0,
+    SegmentRisque.MOYEN: 1,
+    SegmentRisque.ELEVE: 2,
+    SegmentRisque.CRITIQUE: 3,
+}
 
 
 def _jours_depuis(reference: date | None, aujourdhui: date) -> int | None:
@@ -154,6 +163,44 @@ class SegmentationRepository:
             .group_by(Promesse.dossier_id, Promesse.debiteur_id)
         )
         return {(row[0], row[1]): (row[2], row[3], row[4]) for row in result.all()}
+
+    async def classement_par_couple(
+        self, organisation_id: int | None
+    ) -> dict[tuple[int, int], tuple[Segmentation, Creance]]:
+        """Le classement ramene a la maille de la file de relance.
+
+        La segmentation classe des CREANCES, la file de travail vise un DEBITEUR
+        DANS UN DOSSIER : un seul appel couvre tous ses impayes. Il faut donc
+        elire, parmi les creances du couple, celle qui le represente.
+
+        La regle : le pire segment l'emporte, et a segment egal le plus gros
+        montant restant. Un debiteur qui paie une facture et pas l'autre est
+        range sur celle qu'il ne paie pas — c'est elle qui justifie l'appel, et
+        c'est sa justification que l'agent doit lire avant de decrocher.
+        """
+        result = await self.db.execute(
+            select(Segmentation, Creance)
+            .join(Creance, Segmentation.creance_id == Creance.id)
+            .where(self._portee(organisation_id), Creance.statut.in_(STATUTS_ACTIFS))
+        )
+
+        elus: dict[tuple[int, int], tuple[Segmentation, Creance]] = {}
+        for segmentation, creance in result.all():
+            cle = (creance.dossier_id, creance.debiteur_id)
+            sortant = elus.get(cle)
+            if sortant is None or self._prime_sur(segmentation, creance, *sortant):
+                elus[cle] = (segmentation, creance)
+        return elus
+
+    @staticmethod
+    def _prime_sur(
+        candidat: Segmentation, sa_creance: Creance, sortant: Segmentation, son_creance: Creance
+    ) -> bool:
+        rang_candidat = RANG_SEGMENT[candidat.segment]
+        rang_sortant = RANG_SEGMENT[sortant.segment]
+        if rang_candidat != rang_sortant:
+            return rang_candidat > rang_sortant
+        return (sa_creance.montant_restant or 0) > (son_creance.montant_restant or 0)
 
     async def cartographie(
         self, organisation_id: int | None
