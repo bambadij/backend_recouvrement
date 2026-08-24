@@ -1,8 +1,9 @@
 import enum
 from datetime import date, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -63,6 +64,13 @@ class Dossier(Base):
     reference: Mapped[str | None] = mapped_column(String(100), index=True)
     #: Jour ou la demande a ete confiee, saisi par l'agent — pas la date de saisie.
     date_reception: Mapped[date] = mapped_column(Date, default=date.today)
+
+    # Ce que le client annonce confier, tel qu'il le dit — pas un total calcule.
+    # Le montant reel du dossier reste la somme de ses creances, ici et partout
+    # ailleurs : ce champ ne sert qu'a mesurer l'ecart avec la saisie, donc a
+    # reperer les factures oubliees. NULL quand le client n'a rien annonce, ce
+    # qui est le cas courant.
+    montant_annonce: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     type_dossier: Mapped[TypeDossier] = mapped_column(
         Enum(TypeDossier, name="type_dossier"), default=TypeDossier.LOCAL

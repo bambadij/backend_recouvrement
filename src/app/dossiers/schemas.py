@@ -1,9 +1,44 @@
+import enum
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.dossiers.models import ObjectifDossier, StatutDossier, TypeDossier
+
+
+#: Ecart relatif en deca duquel annonce et saisie sont tenues pour concordantes.
+#: Un client arrondit toujours ce qu'il annonce ; signaler 40 000 F d'ecart sur
+#: 12 M produirait une alerte permanente, donc une alerte qu'on ignore.
+SEUIL_ECART = Decimal("0.02")
+
+
+class Concordance(str, enum.Enum):
+    """Comparaison entre le montant annonce par le client et le montant saisi."""
+
+    CONFORME = "CONFORME"
+    #: La saisie reste sous l'annonce : des factures manquent probablement.
+    INCOMPLETE = "INCOMPLETE"
+    #: La saisie depasse l'annonce. Pas une anomalie en soi — le client a pu
+    #: sous-estimer — mais l'agent doit le savoir avant de rendre ses chiffres.
+    DEPASSEE = "DEPASSEE"
+
+
+def concordance(montant_annonce: Decimal | None, montant_saisi: Decimal) -> Concordance | None:
+    """Etat de la comparaison, ou None quand le client n'a rien annonce.
+
+    Calcule ici et nulle part ailleurs : la liste et le panneau d'analyse lisent
+    le meme verdict, sinon deux ecrans finiraient par ne pas dire la meme chose
+    du meme dossier.
+    """
+    if montant_annonce is None or montant_annonce <= 0:
+        return None
+    ecart = (montant_annonce - montant_saisi) / montant_annonce
+    if ecart > SEUIL_ECART:
+        return Concordance.INCOMPLETE
+    if -ecart > SEUIL_ECART:
+        return Concordance.DEPASSEE
+    return Concordance.CONFORME
 
 
 class DossierBase(BaseModel):
@@ -13,6 +48,9 @@ class DossierBase(BaseModel):
     #: Reference du client. Champ libre : les formats varient d'un client a l'autre.
     reference: str | None = None
     date_reception: date | None = None
+    #: Ce que le client annonce confier. Facultatif, et jamais utilise comme
+    #: montant du dossier : celui-ci reste la somme des creances saisies.
+    montant_annonce: Decimal | None = Field(default=None, ge=0)
     type_dossier: TypeDossier = TypeDossier.LOCAL
     objectif: ObjectifDossier = ObjectifDossier.AMIABLE
     notes: str | None = None
@@ -27,6 +65,8 @@ class DossierUpdate(BaseModel):
     creancier_id: int | None = None
     reference: str | None = None
     date_reception: date | None = None
+    #: Envoyer null efface l'annonce : l'ecart cesse alors d'etre affiche.
+    montant_annonce: Decimal | None = Field(default=None, ge=0)
     type_dossier: TypeDossier | None = None
     objectif: ObjectifDossier | None = None
     statut: StatutDossier | None = None
@@ -42,6 +82,7 @@ class DossierRead(BaseModel):
     creancier_id: int | None
     reference: str | None
     date_reception: date
+    montant_annonce: Decimal | None
     type_dossier: TypeDossier
     objectif: ObjectifDossier
     statut: StatutDossier
@@ -66,6 +107,8 @@ class DossierListItem(DossierRead):
     nb_debiteurs: int
     montant_initial: Decimal
     montant_restant: Decimal
+    #: Verdict de la comparaison annonce / saisie. Nul quand rien n'a ete annonce.
+    concordance: Concordance | None = None
 
 
 class EncoursDebiteur(BaseModel):
@@ -106,6 +149,12 @@ class FaitsDossier(BaseModel):
     montant_encaisse: Decimal
     #: Part deja recouvree, en pourcent du montant confie.
     taux_recouvrement: int
+
+    #: Ce que le client avait annonce, s'il l'a annonce.
+    montant_annonce: Decimal | None
+    #: Annonce moins saisi : positif quand des factures manquent a l'appel.
+    ecart_annonce: Decimal | None
+    concordance: Concordance | None
 
     creances_par_statut: dict[str, int]
     #: Encours par tranche d'anciennete : « a jour », « 1-30 j », « 31-60 j »…

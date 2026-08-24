@@ -15,6 +15,7 @@ from app.dossiers.schemas import (
     EncoursDebiteur,
     FaitsDossier,
     LecturesGraphiques,
+    concordance,
 )
 from app.ia.dossier import AnalyseDossierIA
 from app.users.models import User
@@ -88,6 +89,9 @@ class DossierService:
                     nb_debiteurs=nb_deb,
                     montant_initial=initial,
                     montant_restant=restant,
+                    # Compare a l'initial et non au restant : l'annonce porte sur
+                    # ce qui est confie, un encaissement ne la contredit pas.
+                    concordance=concordance(dossier.montant_annonce, initial),
                 )
             )
         return items
@@ -216,6 +220,9 @@ class DossierService:
             montant_restant=restant,
             montant_encaisse=encaisse,
             taux_recouvrement=int(encaisse / confie * 100) if confie > 0 else 0,
+            montant_annonce=dossier.montant_annonce,
+            ecart_annonce=(dossier.montant_annonce - confie) if dossier.montant_annonce is not None else None,
+            concordance=concordance(dossier.montant_annonce, confie),
             creances_par_statut=par_statut,
             balance_agee=balance,
             debiteurs=debiteurs,
