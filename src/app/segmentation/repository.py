@@ -65,7 +65,7 @@ class SegmentationRepository:
         # agrege sur ce couple puis on redistribue sur ses creances.
         relances = await self._agregats_relances(couples)
         paiements = await self._agregats_paiements(creance_ids)
-        promesses = await self._agregats_promesses(creance_ids)
+        promesses = await self._agregats_promesses(couples)
 
         faits: list[FaitsDossier] = []
         for creance, debiteur in lignes:
@@ -73,7 +73,9 @@ class SegmentationRepository:
                 (creance.dossier_id, creance.debiteur_id), (0, 0, None)
             )
             nb_paiements, dernier_paiement = paiements.get(creance.id, (0, None))
-            nb_promesses, tenues, rompues = promesses.get(creance.id, (0, 0, 0))
+            nb_promesses, tenues, rompues = promesses.get(
+                (creance.dossier_id, creance.debiteur_id), (0, 0, 0)
+            )
 
             initial = creance.montant_initial or 0
             regle = initial - creance.montant_restant
@@ -130,18 +132,28 @@ class SegmentationRepository:
         )
         return {row[0]: (row[1], row[2]) for row in result.all()}
 
-    async def _agregats_promesses(self, creance_ids: list[int]) -> dict[int, tuple[int, int, int]]:
+    async def _agregats_promesses(
+        self, couples: list[tuple[int, int]]
+    ) -> dict[tuple[int, int], tuple[int, int, int]]:
+        """Compteurs de promesses par (dossier, debiteur) — la meme maille que les relances.
+
+        Une promesse engage un debiteur dans un dossier, pas une facture : c'est
+        au telephone qu'elle se prend, et le debiteur promet de payer, pas de
+        payer telle ligne. Elle se redistribue donc sur toutes ses creances,
+        comme les relances juste au-dessus.
+        """
         result = await self.db.execute(
             select(
-                Promesse.creance_id,
+                Promesse.dossier_id,
+                Promesse.debiteur_id,
                 func.count(),
                 func.count().filter(Promesse.statut == StatutPromesse.TENUE),
                 func.count().filter(Promesse.statut == StatutPromesse.ROMPUE),
             )
-            .where(Promesse.creance_id.in_(creance_ids))
-            .group_by(Promesse.creance_id)
+            .where(Promesse.dossier_id.in_({d for d, _ in couples}))
+            .group_by(Promesse.dossier_id, Promesse.debiteur_id)
         )
-        return {row[0]: (row[1], row[2], row[3]) for row in result.all()}
+        return {(row[0], row[1]): (row[2], row[3], row[4]) for row in result.all()}
 
     async def cartographie(
         self, organisation_id: int | None
