@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import func, select, true
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.creances.models import Creance
@@ -15,7 +15,7 @@ from app.debiteurs.schemas import DebiteurCreate, DebiteurUpdate
 from app.debiteurs.telephone import normaliser
 from app.paiements.models import Paiement
 from app.promesses.models import Promesse
-from app.relances.models import Relance
+from app.relances.models import ISSUES_AVEC_REPONSE, Relance
 
 
 class DebiteurRepository:
@@ -138,15 +138,24 @@ class DebiteurRepository:
     async def compter_relances(self, debiteur_id: int) -> list[tuple]:
         """Relances par canal, et combien ont obtenu un retour.
 
-        « Avec reponse » se lit sur le champ resultat : il n'est rempli que
-        lorsque le debiteur a effectivement reagi. C'est la seule trace de
-        reponse dont dispose le modele de donnees.
+        « Avec reponse » se lit sur l'issue consignee — promesse, reponse ou
+        refus — et retombe sur le texte libre pour les relances anterieures a
+        cette colonne. Le compter sur le seul champ resultat, comme avant,
+        revenait a declarer muet tout debiteur qu'on n'avait pas encore annote :
+        le champ n'etait alors saisissable qu'AVANT l'envoi.
         """
         result = await self.db.execute(
             select(
                 Relance.type_relance,
                 func.count().label("nb"),
-                func.count(Relance.resultat).label("avec_reponse"),
+                func.count()
+                .filter(
+                    or_(
+                        Relance.issue.in_(ISSUES_AVEC_REPONSE),
+                        and_(Relance.issue.is_(None), Relance.resultat.isnot(None)),
+                    )
+                )
+                .label("avec_reponse"),
             )
             .where(Relance.debiteur_id == debiteur_id)
             .group_by(Relance.type_relance)
