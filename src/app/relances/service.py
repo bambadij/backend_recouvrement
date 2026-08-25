@@ -4,11 +4,15 @@ from decimal import Decimal
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.debiteurs.service import DebiteurService
 from app.dossiers.service import DossierService
-from app.relances.models import Relance, StatutRelance
+from app.promesses.models import SourcePromesse
+from app.promesses.repository import PromesseRepository
+from app.promesses.schemas import PromesseCreate
+from app.relances.models import ISSUES_AVEC_REPONSE, IssueRelance, Relance, StatutRelance
 from app.relances.repository import RelanceRepository
 from app.relances.schemas import (
     FileDeTravail,
     FileDisponible,
+    IssueRelanceRequest,
     LigneARelancer,
     RelanceCreate,
     RelanceUpdate,
@@ -46,11 +50,17 @@ class RelanceService:
         dossier_service: DossierService,
         debiteur_service: DebiteurService,
         segmentation_repository: SegmentationRepository,
+        promesse_repository: PromesseRepository,
         current_user: User,
     ) -> None:
         self.repository = repository
         self.dossier_service = dossier_service
         self.debiteur_service = debiteur_service
+        # Le depot la aussi, pas le service : PromesseService reclame le client
+        # d'extraction IA, qui n'a rien a faire dans le chemin d'une relance. La
+        # portee est deja garantie — la relance a ete lue dans l'organisation de
+        # l'appelant, et la promesse herite de son dossier.
+        self.promesse_repository = promesse_repository
         # Le depot, pas le service : on ne fait que LIRE un classement deja
         # calcule. Passer par le service de segmentation exposerait ici la passe
         # payante, dans un ecran ou personne ne doit pouvoir la declencher.
@@ -129,7 +139,18 @@ class RelanceService:
         for couple in couples:
             cle = (couple.dossier_id, couple.debiteur_id)
             derniere = dernieres.get(cle)
-            repondue = bool(derniere is not None and (derniere.resultat or "").strip())
+            # Le contact se lit sur l'issue, plus sur le fait qu'un texte libre
+            # soit rempli. L'ancienne lecture confondait « personne n'a repondu »
+            # avec « personne n'a note la reponse » : comme le champ n'etait
+            # saisissable qu'avant l'envoi, tout le portefeuille passait pour
+            # muet. Le texte reste la porte de sortie des relances d'avant.
+            repondue = bool(
+                derniere is not None
+                and (
+                    derniere.issue in ISSUES_AVEC_REPONSE
+                    or (derniere.issue is None and (derniere.resultat or "").strip())
+                )
+            )
             classe = classement.get(cle)
             ligne = LigneARelancer(
                 dossier_id=couple.dossier_id,
@@ -145,6 +166,9 @@ class RelanceService:
                 derniere_relance=derniere.date_relance if derniere else None,
                 derniere_relance_canal=derniere.type_relance if derniere else None,
                 derniere_relance_repondue=repondue,
+                derniere_relance_id=derniere.id if derniere else None,
+                derniere_relance_issue=derniere.issue if derniere else None,
+                derniere_relance_resultat=derniere.resultat if derniere else None,
                 relance_planifiee_id=planifiees.get(cle),
                 segment=classe[0].segment if classe else None,
                 potentiel=classe[0].potentiel if classe else None,
@@ -232,9 +256,14 @@ class RelanceService:
         # seulement d'etre marque.
         if ligne.derniere_relance is None and ligne.relance_planifiee_id is None:
             files.add("jamais_relance")
+        # « Sans reponse » demande une constatation, pas une absence de saisie.
+        # Tant que l'issue n'est pas consignee, on ne SAIT pas si le debiteur a
+        # repondu : ranger la ligne ici affirmerait un silence qu'on n'a pas
+        # verifie. C'est ce qui faisait passer tout le portefeuille dans ce
+        # critere, et le rendait donc inutile.
         if (
             ligne.derniere_relance is not None
-            and not ligne.derniere_relance_repondue
+            and ligne.derniere_relance_issue is IssueRelance.SANS_REPONSE
             and (aujourdhui - ligne.derniere_relance).days > self.SILENCE_JOURS
         ):
             files.add("sans_reponse")
@@ -246,6 +275,45 @@ class RelanceService:
         relance = await self.get_relance(relance_id)
         self._writable_organisation_id()
         return await self.repository.update(relance, data)
+
+    async def enregistrer_issue(self, relance_id: int, data: IssueRelanceRequest) -> Relance:
+        """Consigne ce que la relance a produit, et l'engagement s'il y en a un.
+
+        Aucune contrainte de statut : une relance s'annote surtout APRES son
+        envoi. C'est le defaut qu'on repare — le champ n'etait offert que tant
+        qu'elle etait planifiee, donc au seul moment ou l'agent ne peut rien
+        savoir, et disparaissait ensuite pour toujours.
+
+        Une issue se corrige aussi : l'agent qui s'est trompe de ligne, ou le
+        debiteur qui rappelle le lendemain pour s'engager, doivent pouvoir la
+        reecrire. Seule la promesse deja creee n'est pas defaite ici — la
+        supprimer effacerait un engagement que le suivi a peut-etre deja
+        rapproche d'un paiement.
+        """
+        relance = await self.get_relance(relance_id)
+        self._writable_organisation_id()
+
+        await self.repository.update(
+            relance, RelanceUpdate(issue=data.issue, resultat=data.resultat)
+        )
+
+        if data.issue is IssueRelance.A_PROMIS and data.montant_promis is not None:
+            # SAISIE et non INFEREE : c'est l'agent qui rapporte le fait, pas un
+            # modele qui l'a lu dans une phrase. La segmentation pondere les deux
+            # differemment, a raison.
+            await self.promesse_repository.create(
+                PromesseCreate(
+                    dossier_id=relance.dossier_id,
+                    debiteur_id=relance.debiteur_id,
+                    relance_id=relance.id,
+                    date_echeance_promesse=data.date_echeance_promesse,
+                    montant_promis=data.montant_promis,
+                    commentaire=data.resultat,
+                ),
+                relance.organisation_id,
+                source=SourcePromesse.SAISIE,
+            )
+        return relance
 
     async def delete_relance(self, relance_id: int) -> None:
         relance = await self.get_relance(relance_id)

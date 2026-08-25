@@ -225,14 +225,27 @@ class RelanceRepository:
         """
         result = await self.db.execute(
             select(
+                Relance.id,
                 Relance.dossier_id,
                 Relance.debiteur_id,
                 Relance.date_relance,
                 Relance.type_relance,
+                # L'identifiant et l'issue voyagent avec : c'est cette relance-la
+                # que la file donne a annoter, sans passer par la fiche creance.
+                Relance.issue,
                 Relance.resultat,
             )
             .where(self._portee(organisation_id), Relance.statut == StatutRelance.ENVOYEE)
-            .order_by(Relance.dossier_id, Relance.debiteur_id, Relance.date_relance.desc())
+            # A egalite de jour, la plus recemment creee l'emporte : deux relances
+            # posees le meme jour sur le meme debiteur ne doivent pas se departager
+            # au hasard, sinon l'issue s'inscrirait sur l'une et s'afficherait
+            # depuis l'autre.
+            .order_by(
+                Relance.dossier_id,
+                Relance.debiteur_id,
+                Relance.date_relance.desc(),
+                Relance.id.desc(),
+            )
             .distinct(Relance.dossier_id, Relance.debiteur_id)
         )
         return {(row.dossier_id, row.debiteur_id): row for row in result.all()}

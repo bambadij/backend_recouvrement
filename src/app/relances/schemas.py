@@ -1,9 +1,9 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.relances.models import StatutRelance, TypeRelance
+from app.relances.models import IssueRelance, StatutRelance, TypeRelance
 from app.segmentation.models import PotentielRecouvrement, SegmentRisque
 
 
@@ -27,7 +27,40 @@ class RelanceCreate(RelanceBase):
 
 class RelanceUpdate(BaseModel):
     statut: StatutRelance | None = None
+    issue: IssueRelance | None = None
     resultat: str | None = None
+
+
+class IssueRelanceRequest(BaseModel):
+    """Le retour obtenu, tel que l'agent le consigne en raccrochant.
+
+    Le montant et l'echeance ne sont demandes que pour A_PROMIS, et ils vont
+    alors droit dans une promesse : un engagement est une donnee structuree, et
+    la faire ecrire en toutes lettres pour la faire relire ensuite par un modele
+    coute un appel et une chance de se tromper. L'agent qui vient de raccrocher
+    a le montant et la date en tete.
+    """
+
+    issue: IssueRelance
+    #: La nuance, facultative quelle que soit l'issue.
+    resultat: str | None = Field(default=None, max_length=1000)
+    montant_promis: Decimal | None = Field(default=None, gt=0)
+    date_echeance_promesse: date | None = None
+
+    @model_validator(mode="after")
+    def _coherence(self) -> "IssueRelanceRequest":
+        engage = self.montant_promis is not None or self.date_echeance_promesse is not None
+        if engage and self.issue is not IssueRelance.A_PROMIS:
+            raise ValueError(
+                "Un montant ou une echeance ne se joint qu'a l'issue « a promis de payer »"
+            )
+        # Les deux ou aucun : une promesse sans date ne se suit pas, un montant
+        # sans date ne s'echoit jamais, et l'inverse ne se rapproche d'aucun
+        # paiement. A_PROMIS sans les deux reste permis — l'agent note l'issue
+        # maintenant et complete l'engagement plus tard.
+        if (self.montant_promis is None) != (self.date_echeance_promesse is None):
+            raise ValueError("Le montant promis et son echeance vont ensemble")
+        return self
 
 
 class FileDisponible(BaseModel):
@@ -68,8 +101,17 @@ class LigneARelancer(BaseModel):
     #: reviendrait a dire qu'on a relance quelqu'un qui n'a rien recu.
     derniere_relance: date | None
     derniere_relance_canal: TypeRelance | None
-    #: Vrai si cette derniere relance a obtenu un retour (champ resultat rempli).
+    #: Vrai si cette derniere relance a etabli un contact — promesse, reponse ou
+    #: refus. Faux quand elle est restee sans reponse ET quand elle n'a pas
+    #: encore ete annotee : c'est « derniere_relance_issue » qui distingue les deux.
     derniere_relance_repondue: bool
+    #: Identifiant de cette derniere relance partie : c'est elle qu'on annote
+    #: depuis la file, sans passer par la fiche creance.
+    derniere_relance_id: int | None = None
+    #: Son issue, ou None tant que personne ne l'a consignee.
+    derniere_relance_issue: IssueRelance | None = None
+    #: La nuance saisie avec l'issue, affichee telle quelle sous la ligne.
+    derniere_relance_resultat: str | None = None
 
     #: Relance deja planifiee et non emise, s'il y en a une. Sans ce temoin, la
     #: file afficherait « jamais relance » a cote d'une relance en attente et
@@ -121,6 +163,7 @@ class RelanceRead(BaseModel):
     date_relance: date
     statut: StatutRelance
     contenu: str | None
+    issue: IssueRelance | None
     resultat: str | None
     cree_par_nom: str | None
     created_at: datetime

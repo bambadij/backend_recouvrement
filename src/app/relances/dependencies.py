@@ -8,6 +8,7 @@ from app.debiteurs.dependencies import get_debiteur_service
 from app.debiteurs.service import DebiteurService
 from app.dossiers.dependencies import get_dossier_service
 from app.dossiers.service import DossierService
+from app.promesses.repository import PromesseRepository
 from app.relances.repository import RelanceRepository
 from app.relances.service import RelanceService
 from app.segmentation.repository import SegmentationRepository
@@ -25,6 +26,7 @@ def get_relance_service(
         dossier_service,
         debiteur_service,
         SegmentationRepository(db),
+        PromesseRepository(db),
         current_user,
     )
 

@@ -2,7 +2,13 @@ from fastapi import APIRouter, Query, status
 
 from app.relances.dependencies import RelanceServiceDep
 from app.relances.models import StatutRelance
-from app.relances.schemas import FileDeTravail, RelanceCreate, RelanceRead, RelanceUpdate
+from app.relances.schemas import (
+    FileDeTravail,
+    IssueRelanceRequest,
+    RelanceCreate,
+    RelanceRead,
+    RelanceUpdate,
+)
 from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/relances", tags=["relances"])
@@ -55,6 +61,24 @@ async def file_de_travail(
 @router.get("/{relance_id}", response_model=RelanceRead)
 async def get_relance(relance_id: int, service: RelanceServiceDep) -> RelanceRead:
     relance = await service.get_relance(relance_id)
+    return RelanceRead.model_validate(relance)
+
+
+@router.post("/{relance_id}/issue", response_model=RelanceRead)
+async def enregistrer_issue(
+    relance_id: int, data: IssueRelanceRequest, service: RelanceServiceDep
+) -> RelanceRead:
+    """Consigne ce que la relance a produit, et l'engagement s'il y en a un.
+
+    Un seul geste : l'agent raccroche, choisit l'issue, et si le debiteur s'est
+    engage il donne le montant et l'echeance. La promesse est creee dans la
+    foulee, SAISIE — pas besoin d'un appel de modele pour relire une phrase que
+    l'agent aurait ecrite a la place.
+
+    Aucune contrainte de statut : une relance s'annote surtout apres son envoi,
+    et une issue se corrige.
+    """
+    relance = await service.enregistrer_issue(relance_id, data)
     return RelanceRead.model_validate(relance)
 
 

@@ -28,6 +28,30 @@ class StatutRelance(str, enum.Enum):
     ECHOUEE = "ECHOUEE"
 
 
+class IssueRelance(str, enum.Enum):
+    """Ce que la relance a produit, du meilleur au pire.
+
+    A distinguer du statut, qui ne dit que le sort de l'ENVOI : une relance
+    parfaitement envoyee peut n'obtenir aucune reponse. Les quatre valeurs sont
+    exclusives et ordonnees ; c'est ce qui permet un taux de reponse par canal.
+
+    NULL n'est pas une cinquieme valeur : il signifie « pas encore annotee »,
+    ce qui ne se confond pas avec SANS_REPONSE. Confondre les deux revenait a
+    declarer muets tous les debiteurs qu'on n'avait pas encore rappeles.
+    """
+
+    A_PROMIS = "A_PROMIS"
+    A_REPONDU = "A_REPONDU"
+    SANS_REPONSE = "SANS_REPONSE"
+    REFUSE = "REFUSE"
+
+
+#: Issues qui temoignent d'un contact etabli. Un refus est une reponse : le
+#: debiteur a repondu, mal, mais il a repondu — le relancer a l'identique ne
+#: sert a rien, ce qui est justement ce que la file cherche a savoir.
+ISSUES_AVEC_REPONSE = (IssueRelance.A_PROMIS, IssueRelance.A_REPONDU, IssueRelance.REFUSE)
+
+
 class Relance(Base):
     __tablename__ = "relances"
 
@@ -46,6 +70,14 @@ class Relance(Base):
         Enum(StatutRelance, name="statut_relance"), default=StatutRelance.PLANIFIEE
     )
     contenu: Mapped[str | None] = mapped_column(String(2000))
+
+    # Ce que la relance a produit. NULL tant que l'agent n'a rien annote — ce
+    # qui n'est pas la meme chose que SANS_REPONSE.
+    issue: Mapped[IssueRelance | None] = mapped_column(
+        Enum(IssueRelance, name="issue_relance"), index=True
+    )
+    #: La nuance, en toutes lettres. Garde a cote de l'issue et non remplace par
+    #: elle : quatre cases ne disent pas « conteste le montant de la facture 3 ».
     resultat: Mapped[str | None] = mapped_column(String(1000))
 
     # Nom de l'agent ayant emis la relance, fige au moment de l'emission — meme
