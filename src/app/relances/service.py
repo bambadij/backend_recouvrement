@@ -116,9 +116,13 @@ class RelanceService:
         couples = await self.repository.couples_a_relancer(organisation_id)
         dernieres = await self.repository.derniere_relance_envoyee(organisation_id)
         planifiees = await self.repository.relances_planifiees(organisation_id)
-        # Le classement, quand il existe. Une lecture en base, aucun appel de
-        # modele : la file s'affiche a la meme vitesse qu'avant.
-        classement = await self.segmentation_repository.classement_par_couple(organisation_id)
+        # Le classement, quand il existe. Deux lectures en base, aucun appel de
+        # modele : la file s'affiche a la meme vitesse qu'avant. Il est restreint
+        # aux couples de la file — inutile de ramener le portefeuille entier
+        # pour annoter la centaine de lignes qu'on affiche.
+        cles = [(c.dossier_id, c.debiteur_id) for c in couples]
+        classement = await self.segmentation_repository.classement_par_couple(organisation_id, cles)
+        derniere_passe = await self.segmentation_repository.derniere_passe(organisation_id)
         aujourdhui = date.today()
 
         lignes: list[LigneARelancer] = []
@@ -167,8 +171,8 @@ class RelanceService:
         # Le classement quand il existe, le montant sinon — ou sur demande. Un
         # ecran qui n'afficherait rien tant qu'aucune passe n'a tourne serait un
         # ecran de travail rendu inutilisable par une fonction facultative.
-        classees = [ligne for ligne in dans_la_file if ligne.potentiel is not None]
-        tri_actif = "montant" if tri == "montant" or not classees else "classement"
+        nb_classees = sum(1 for ligne in dans_la_file if ligne.potentiel is not None)
+        tri_actif = "montant" if tri == "montant" or not nb_classees else "classement"
 
         if tri_actif == "classement":
             # Meme regle que la page de classement : d'abord ce qui a le plus de
@@ -193,10 +197,13 @@ class RelanceService:
             files=files,
             lignes=retenues[:limit],
             tri_actif=tri_actif,
-            classement_calcule_le=max(
-                (c[0].calcule_le for c in classement.values()), default=None
-            ),
-            non_classees=sum(1 for ligne in dans_la_file if ligne.potentiel is None),
+            classement_calcule_le=derniere_passe,
+            # Dit a l'interface si le tri par classement a un sens ICI : un
+            # classement peut exister ailleurs dans le portefeuille sans qu'une
+            # seule ligne de ce critere soit classee, et proposer alors une
+            # bascule qui ne peut rien changer vaut moins que ne rien proposer.
+            classees=nb_classees,
+            non_classees=len(dans_la_file) - nb_classees,
         )
 
     def _seuil_gros_montants(self, lignes: list[LigneARelancer]) -> Decimal | None:

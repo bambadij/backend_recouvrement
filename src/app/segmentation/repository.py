@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select, true
+from sqlalchemy import case, func, select, true, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.debiteurs.models import Debiteur
@@ -165,7 +165,7 @@ class SegmentationRepository:
         return {(row[0], row[1]): (row[2], row[3], row[4]) for row in result.all()}
 
     async def classement_par_couple(
-        self, organisation_id: int | None
+        self, organisation_id: int | None, couples: list[tuple[int, int]]
     ) -> dict[tuple[int, int], tuple[Segmentation, Creance]]:
         """Le classement ramene a la maille de la file de relance.
 
@@ -177,30 +177,55 @@ class SegmentationRepository:
         montant restant. Un debiteur qui paie une facture et pas l'autre est
         range sur celle qu'il ne paie pas — c'est elle qui justifie l'appel, et
         c'est sa justification que l'agent doit lire avant de decrocher.
+
+        L'election se fait en SQL, par DISTINCT ON, et non en Python sur tout le
+        portefeuille : la file se recharge a chaque clic de critere, et ramener
+        des dizaines de milliers de lignes pour n'en garder qu'une par couple
+        coutait cette lecture entiere a chaque fois. Le tri porte la meme regle
+        que RANG_SEGMENT, construit depuis lui pour qu'ils ne puissent pas
+        diverger.
         """
+        if not couples:
+            return {}
+
+        rang = case(
+            *[(Segmentation.segment == segment, valeur) for segment, valeur in RANG_SEGMENT.items()],
+            else_=0,
+        )
         result = await self.db.execute(
             select(Segmentation, Creance)
             .join(Creance, Segmentation.creance_id == Creance.id)
-            .where(self._portee(organisation_id), Creance.statut.in_(STATUTS_ACTIFS))
+            .where(
+                self._portee(organisation_id),
+                Creance.statut.in_(STATUTS_ACTIFS),
+                tuple_(Creance.dossier_id, Creance.debiteur_id).in_(couples),
+            )
+            .distinct(Creance.dossier_id, Creance.debiteur_id)
+            .order_by(
+                Creance.dossier_id,
+                Creance.debiteur_id,
+                rang.desc(),
+                Creance.montant_restant.desc(),
+            )
         )
+        return {
+            (creance.dossier_id, creance.debiteur_id): (segmentation, creance)
+            for segmentation, creance in result.all()
+        }
 
-        elus: dict[tuple[int, int], tuple[Segmentation, Creance]] = {}
-        for segmentation, creance in result.all():
-            cle = (creance.dossier_id, creance.debiteur_id)
-            sortant = elus.get(cle)
-            if sortant is None or self._prime_sur(segmentation, creance, *sortant):
-                elus[cle] = (segmentation, creance)
-        return elus
+    async def derniere_passe(self, organisation_id: int | None) -> datetime | None:
+        """Quand la derniere passe de classement a tourne, ou None si aucune.
 
-    @staticmethod
-    def _prime_sur(
-        candidat: Segmentation, sa_creance: Creance, sortant: Segmentation, son_creance: Creance
-    ) -> bool:
-        rang_candidat = RANG_SEGMENT[candidat.segment]
-        rang_sortant = RANG_SEGMENT[sortant.segment]
-        if rang_candidat != rang_sortant:
-            return rang_candidat > rang_sortant
-        return (sa_creance.montant_restant or 0) > (son_creance.montant_restant or 0)
+        Une requete a part, et non le maximum des creances elues : une passe qui
+        reclasse une facture non elue est bien une passe, et la file doit
+        l'annoncer. Sans cela, un administrateur venant de lancer un classement
+        lisait une date vieille de trois semaines et croyait son geste sans effet.
+        """
+        return await self.db.scalar(
+            select(func.max(Segmentation.calcule_le))
+            .join(Creance, Segmentation.creance_id == Creance.id)
+            .where(self._portee(organisation_id))
+        )
 
     async def cartographie(
         self, organisation_id: int | None

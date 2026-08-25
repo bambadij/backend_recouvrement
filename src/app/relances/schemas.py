@@ -103,6 +103,9 @@ class FileDeTravail(BaseModel):
     #: Quand la derniere passe a tourne. Nul si aucune. Rendu a tous les roles :
     #: un agent ne declenche pas le classement mais doit savoir s'il est frais.
     classement_calcule_le: datetime | None = None
+    #: Lignes classees dans CE critere. Zero signifie qu'un tri par classement
+    #: n'y changerait rien, meme si le portefeuille en compte ailleurs.
+    classees: int = 0
     #: Lignes de cette file qui n'ont pas encore ete classees.
     non_classees: int = 0
 
