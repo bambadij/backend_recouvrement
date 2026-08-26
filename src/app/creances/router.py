@@ -4,17 +4,23 @@ from fastapi import APIRouter, Query, status
 
 from app.creances.dependencies import CreanceServiceDep
 from app.creances.models import StatutCreance
+from app.creances.echeancier import generer as generer_echeancier
 from app.creances.schemas import CreanceCreate, CreanceRead, CreanceUpdate
 from app.debiteurs.dependencies import DebiteurServiceDep
 from app.debiteurs.schemas import FaitsDebiteur
 from app.ia.dependencies import AssistantIADep, RedactionServiceDep
 from app.ia.schemas import (
+    AjustementBrouillon,
     AssistantRequest,
     AssistantResponse,
+    BrouillonRelance,
+    BrouillonRequest,
+    EcheanceProposee,
     MessageRelanceRequest,
     MessageRelanceResponse,
 )
 from app.organisations.dependencies import OrganisationServiceDep
+from app.relances.conseil import canal_conseille
 from app.relances.dependencies import RelanceServiceDep
 from app.users.dependencies import CurrentAdminDep, CurrentUserDep
 
@@ -108,6 +114,122 @@ async def rediger_message_relance(
         creance, debiteur, relances, data, current_user, organisation
     )
     return MessageRelanceResponse(message=message, modele=modele)
+
+
+#: Ce que chaque retouche demande au modele, en une consigne stable.
+#:
+#: Ecrites ici et non cote interface : le meme bouton doit produire la meme
+#: consigne quel que soit l'ecran qui l'affiche, et une consigne qui voyage
+#: depuis le navigateur serait modifiable par quiconque ouvre les outils de
+#: developpement.
+_CONSIGNES = {
+    AjustementBrouillon.PLUS_FERME: (
+        "ferme",
+        "Durcis le ton sans menacer de poursuites : rappelle le retard et demande une date.",
+    ),
+    AjustementBrouillon.PLUS_COURT: (
+        None,
+        "Quatre phrases au maximum, salutation et signature comprises.",
+    ),
+    AjustementBrouillon.POUR_SMS: (
+        None,
+        "Format SMS : 320 caracteres au maximum, pas de formule d'appel, pas de signature "
+        "developpee. Le montant et la date doivent y etre.",
+    ),
+    AjustementBrouillon.EN_ANGLAIS: (
+        None,
+        "Redige le message en anglais, meme registre professionnel.",
+    ),
+}
+
+
+def _consigne_echeancier(plan: list) -> str:
+    """La consigne qui accompagne un plan deja calcule.
+
+    Le plan est fourni au modele tout fait, ligne par ligne. Lui demander de
+    diviser reviendrait a lui confier une arithmetique qu'il ratera un jour sur
+    l'arrondi de la derniere mensualite — dans un courrier deja parti.
+    """
+    lignes = "\n".join(
+        f"- {e.date_echeance.isoformat()} : {e.montant} FCFA" for e in plan
+    )
+    return (
+        "Propose l'echelonnement suivant, deja calcule. Reprends les dates et les montants "
+        "TELS QUELS, sans les recalculer ni les arrondir :\n"
+        f"{lignes}\n"
+        "Demande au debiteur de confirmer son accord."
+    )
+
+
+@router.post("/{creance_id}/brouillon", response_model=BrouillonRelance)
+async def brouillon_relance(
+    creance_id: int,
+    data: BrouillonRequest,
+    service: CreanceServiceDep,
+    debiteur_service: DebiteurServiceDep,
+    relance_service: RelanceServiceDep,
+    organisation_service: OrganisationServiceDep,
+    redaction: RedactionServiceDep,
+    current_user: CurrentUserDep,
+) -> BrouillonRelance:
+    """Le message pret a partir, sans qu'on ait rien eu a demander.
+
+    L'assistant s'ouvre dessus : le bouton s'appelle « Demander a l'assistant »,
+    donc l'ouvrir EST la demande. C'est la difference avec un panneau qu'on
+    ouvre pour regarder, ou une passe payante automatique serait une depense
+    que personne n'a voulue.
+
+    Le canal et l'echeancier sont calcules ici ; le modele ne fait que rediger
+    autour. Une retouche rejoue le meme chemin avec une consigne de plus.
+    """
+    creance = await service.get_creance(creance_id)
+    debiteur = await debiteur_service.get_debiteur(creance.debiteur_id)
+    faits = await debiteur_service.faits_debiteur(creance.debiteur_id)
+    relances = await relance_service.list_relances(dossier_id=creance.dossier_id, limit=50)
+    organisation = (
+        await organisation_service.get_organisation(current_user.organisation_id)
+        if current_user.organisation_id is not None
+        else None
+    )
+
+    # Le canal impose par l'agent prime : la regle propose, elle ne decide pas.
+    if data.canal is not None:
+        canal, raison = data.canal, "Canal choisi par vous."
+    else:
+        canal, raison = canal_conseille(faits.canaux)
+
+    plan = (
+        generer_echeancier(creance.montant_restant, data.mensualites)
+        if data.ajustement is AjustementBrouillon.ECHEANCIER
+        else []
+    )
+
+    ton, instruction = _CONSIGNES.get(data.ajustement, (None, None))
+    if plan:
+        instruction = _consigne_echeancier(plan)
+    consignes = [f"Canal de cette relance : {canal.value}."]
+    if instruction:
+        consignes.append(instruction)
+
+    texte, modele = await redaction.generer_message(
+        creance,
+        debiteur,
+        relances,
+        MessageRelanceRequest(ton=ton, instruction=" ".join(consignes)),
+        current_user,
+        organisation,
+    )
+    return BrouillonRelance(
+        canal=canal,
+        canal_raison=raison,
+        texte=texte,
+        echeancier=[
+            EcheanceProposee(numero=e.numero, date_echeance=e.date_echeance, montant=e.montant)
+            for e in plan
+        ],
+        appuis=_appuis(faits),
+        modele=modele,
+    )
 
 
 #: Libelles des canaux dans les appuis affiches sous la reponse.

@@ -1,6 +1,11 @@
+import enum
+from datetime import date
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from app.relances.models import TypeRelance
 
 
 class MessageRelanceRequest(BaseModel):
@@ -42,5 +47,55 @@ class AssistantResponse(BaseModel):
     reponse: str
     #: Ce sur quoi la reponse s'appuie, en clair : « 9 relances email, 4 appels ».
     #: Calcule en Python, jamais par le modele — c'est ce qui rend l'avis verifiable.
+    appuis: list[str]
+    modele: str
+
+
+class AjustementBrouillon(str, enum.Enum):
+    """Les retouches proposees a l'agent, en clair plutot qu'en texte libre.
+
+    Des pastilles et non un champ vide : l'agent qui ouvre l'assistant sait ce
+    qu'il veut changer — le ton, la longueur, le canal — mais pas comment le
+    demander. Une valeur fermee donne aussi au modele une consigne stable, la
+    ou « rends-le plus direct stp » varie a chaque frappe.
+    """
+
+    PLUS_FERME = "PLUS_FERME"
+    PLUS_COURT = "PLUS_COURT"
+    ECHEANCIER = "ECHEANCIER"
+    POUR_SMS = "POUR_SMS"
+    EN_ANGLAIS = "EN_ANGLAIS"
+
+
+class BrouillonRequest(BaseModel):
+    """Demande de brouillon. Tout est facultatif : l'ouverture n'envoie rien."""
+
+    ajustement: AjustementBrouillon | None = None
+    #: Canal impose par l'agent, qui prime alors sur la regle de deduction.
+    canal: TypeRelance | None = None
+    #: Nombre de mensualites, quand l'ajustement demande un echeancier.
+    mensualites: int = Field(default=3, ge=2, le=12)
+
+
+class EcheanceProposee(BaseModel):
+    numero: int
+    date_echeance: date
+    montant: Decimal
+
+
+class BrouillonRelance(BaseModel):
+    """Le message pret a partir, et de quoi le verifier.
+
+    Le canal et l'echeancier sont calcules en Python ; seul `texte` sort du
+    modele. C'est ce partage qui permet a l'agent de contredire la proposition
+    sans avoir a relire toute la phrase.
+    """
+
+    canal: TypeRelance
+    #: La regle qui a choisi ce canal, en toutes lettres.
+    canal_raison: str
+    texte: str
+    #: Le plan de reglement, quand il a ete demande. Vide sinon.
+    echeancier: list[EcheanceProposee] = Field(default_factory=list)
     appuis: list[str]
     modele: str
