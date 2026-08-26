@@ -420,8 +420,20 @@ class ImportService:
                 if email:
                     cache_email.setdefault(email, debiteur_id)
 
+                donnees_creance = dict(record["creance"])
+                montant_regle = record.get("montant_regle") or Decimal("0")
+                # Une creance qu'on va payer naît EN_COURS, quoi que dise le
+                # fichier : c'est le paiement qui la solde, et enregistrer_paiement
+                # refuse d'encaisser sur une creance deja SOLDEE. Une ligne
+                # « Soldee » avec son reglement complet — le cas le plus normal
+                # d'une reprise de stock — etait donc rejetee, en laissant
+                # derriere elle une facture marquee soldee dont le restant du
+                # valait encore la totalite.
+                if montant_regle > 0:
+                    donnees_creance["statut"] = StatutCreance.EN_COURS
+
                 creance = await self.creance_service.create_creance(
-                    CreanceCreate(debiteur_id=debiteur_id, dossier_id=dossier_id, **record["creance"])
+                    CreanceCreate(debiteur_id=debiteur_id, dossier_id=dossier_id, **donnees_creance)
                 )
                 creances_creees += 1
                 # Montant déjà réglé dans le fichier source : on enregistre un vrai
@@ -431,7 +443,6 @@ class ImportService:
                 # alors que le restant, lui, en tient compte — les deux chiffres se
                 # contrediraient. create_paiement décrémente la créance ET trace
                 # l'encaissement, d'où le passage par le service des paiements.
-                montant_regle = record.get("montant_regle") or Decimal("0")
                 if montant_regle > 0:
                     await self.paiement_service.create_paiement(
                         PaiementCreate(
@@ -451,6 +462,13 @@ class ImportService:
                 # rollback, toutes les lignes suivantes seraient rejetees a leur tour
                 # avec « transaction has been rolled back », y compris les valides.
                 await self.debiteur_repository.rollback()
+                # Le rollback EXPIRE tous les objets ORM de la session, dont
+                # current_user. Le premier acces a l'un de ses champs, a la ligne
+                # suivante, declenche alors une lecture paresseuse hors contexte
+                # async : « greenlet_spawn has not been called ». Toutes les
+                # lignes restantes tombaient ainsi, quelle que soit leur validite
+                # — une seule ligne fautive faisait perdre tout ce qui la suivait.
+                await self.debiteur_repository.db.refresh(self.current_user)
                 rejets.append(ImportRowError(ligne=ligne, message=str(exc)[:200]))
 
         return ImportResult(
