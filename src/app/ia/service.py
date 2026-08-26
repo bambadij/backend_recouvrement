@@ -4,6 +4,7 @@ import anthropic
 
 from app.debiteurs.models import Debiteur
 from app.core.config import settings
+from app.ia import journal
 from app.core.exceptions import BadRequestException
 from app.creances.models import Creance
 from app.ia.schemas import MessageRelanceRequest
@@ -106,6 +107,10 @@ class RedactionService:
         demande: MessageRelanceRequest,
         agent: User | None = None,
         organisation: Organisation | None = None,
+        # « redaction » quand l'agent ouvre le formulaire, « brouillon » quand
+        # l'assistant produit le message de lui-meme : deux gestes de frequences
+        # tres differentes, que le journal doit pouvoir separer.
+        fonction: str = "redaction",
     ) -> tuple[str, str]:
         """Renvoie (message, modele). Leve BadRequestException si la redaction echoue."""
         anthropic_client = self._obtenir_client()
@@ -117,6 +122,7 @@ class RedactionService:
             consignes.append(f"Consigne de l'agent : {demande.instruction}")
         consignes.append("Redige le message de relance.")
 
+        chrono = journal.Chrono()
         try:
             reponse = await anthropic_client.beta.messages.create(
                 model=settings.anthropic_model,
@@ -133,16 +139,26 @@ class RedactionService:
             )
         except anthropic.APIStatusError as e:
             logger.warning("Redaction assistee indisponible : %s", e)
+            await journal.enregistrer(
+                fonction, settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException(
                 "La redaction assistee est momentanement indisponible. "
                 "Utilisez les modeles de message proposes dans le formulaire."
             ) from e
         except anthropic.APIConnectionError as e:
             logger.warning("Redaction assistee injoignable : %s", e)
+            await journal.enregistrer(
+                fonction, settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException(
                 "Le service de redaction est injoignable. "
                 "Utilisez les modeles de message proposes dans le formulaire."
             ) from e
+
+        await journal.enregistrer(
+            fonction, settings.anthropic_model, chrono, reponse=reponse
+        )
 
         # A verifier AVANT de lire le contenu : sur un refus, content est vide ou partiel.
         if reponse.stop_reason == "refusal":

@@ -13,6 +13,7 @@ import logging
 import anthropic
 
 from app.core.config import settings
+from app.ia import journal
 from app.core.exceptions import BadRequestException
 from app.segmentation.models import PotentielRecouvrement, SegmentRisque
 from app.segmentation.schemas import FaitsDossier
@@ -139,6 +140,7 @@ class ClassificationIA:
     async def _classer_lot(
         self, client: anthropic.AsyncAnthropic, lot: list[FaitsDossier]
     ) -> tuple[list[ClassementDossier], str]:
+        chrono = journal.Chrono()
         try:
             reponse = await client.beta.messages.create(
                 model=settings.anthropic_model,
@@ -164,12 +166,22 @@ class ClassificationIA:
             )
         except anthropic.APIStatusError as e:
             logger.warning("Segmentation indisponible : %s", e)
+            await journal.enregistrer(
+                "segmentation", settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException(
                 "La segmentation assistee est momentanement indisponible. Reessayez plus tard."
             ) from e
         except anthropic.APIConnectionError as e:
             logger.warning("Segmentation injoignable : %s", e)
+            await journal.enregistrer(
+                "segmentation", settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException("Le service de segmentation est injoignable.") from e
+
+        await journal.enregistrer(
+            "segmentation", settings.anthropic_model, chrono, reponse=reponse
+        )
 
         if reponse.stop_reason == "refusal":
             raise BadRequestException("La segmentation assistee a refuse ce lot de dossiers.")

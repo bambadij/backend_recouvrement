@@ -17,6 +17,7 @@ import logging
 import anthropic
 
 from app.core.config import settings
+from app.ia import journal
 from app.core.exceptions import BadRequestException
 from app.dossiers.schemas import FaitsDossier
 
@@ -112,6 +113,7 @@ class AnalyseDossierIA:
         """Renvoie (synthese, actions, lectures, modele)."""
         client = self._obtenir_client()
 
+        chrono = journal.Chrono()
         try:
             reponse = await client.beta.messages.create(
                 model=settings.anthropic_model,
@@ -135,10 +137,20 @@ class AnalyseDossierIA:
             )
         except anthropic.APIStatusError as e:
             logger.warning("Analyse de dossier indisponible : %s", e)
+            await journal.enregistrer(
+                "analyse_dossier", settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException("L'analyse est momentanement indisponible.") from e
         except anthropic.APIConnectionError as e:
             logger.warning("Analyse de dossier injoignable : %s", e)
+            await journal.enregistrer(
+                "analyse_dossier", settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException("Le service d'analyse est injoignable.") from e
+
+        await journal.enregistrer(
+            "analyse_dossier", settings.anthropic_model, chrono, reponse=reponse
+        )
 
         if reponse.stop_reason == "refusal":
             raise BadRequestException("L'analyse a ete refusee pour ce dossier.")

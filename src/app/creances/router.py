@@ -218,6 +218,7 @@ async def brouillon_relance(
         MessageRelanceRequest(ton=ton, instruction=" ".join(consignes)),
         current_user,
         organisation,
+        fonction="brouillon",
     )
     return BrouillonRelance(
         canal=canal,

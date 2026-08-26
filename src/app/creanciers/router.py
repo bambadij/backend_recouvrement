@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Query, status
 
 from app.creanciers.dependencies import CreancierServiceDep
-from app.creanciers.schemas import CreancierCreate, CreancierRead, CreancierUpdate
+from app.creanciers.schemas import (
+    CreancierCreate,
+    CreancierRead,
+    CreancierRepertoire,
+    CreancierUpdate,
+)
 from app.users.dependencies import CurrentAdminDep
 
 router = APIRouter(prefix="/creanciers", tags=["creanciers"])
@@ -25,6 +30,27 @@ async def list_creanciers(
 ) -> list[CreancierRead]:
     creanciers = await service.list_creanciers(skip=skip, limit=limit, search=search)
     return [CreancierRead.model_validate(c) for c in creanciers]
+
+
+# Declare avant « /{creancier_id} » : sinon « repertoire » serait pris pour un
+# identifiant et la route repondrait 422.
+@router.get("/repertoire", response_model=list[CreancierRepertoire])
+async def repertoire_creanciers(
+    service: CreancierServiceDep,
+    search: str | None = None,
+) -> list[CreancierRepertoire]:
+    """Tous ceux a qui de l'argent est du, quelle que soit la table qui les porte.
+
+    La liste « creanciers » ne montrait que la table du meme nom. Une ecole qui
+    recouvre ses propres impayes est pourtant creanciere de ses dossiers, sans
+    y figurer : le dossier laisse creancier_id a NULL plutot que de dupliquer
+    l'entite. L'ecran avait herite du stockage et montrait la table au lieu de
+    la realite.
+
+    Distinct de GET /creanciers, qui ne rend que les entites propres — les
+    seules qu'on puisse choisir comme creancier d'un dossier.
+    """
+    return await service.repertoire(search=search)
 
 
 @router.get("/{creancier_id}", response_model=CreancierRead)

@@ -8,8 +8,8 @@ from app.ia.dependencies import AssistantIADep
 from app.ia.recommandations import RecommandationsIA, get_recommandations_ia
 from app.ia.schemas import AssistantRequest, AssistantResponse
 from app.organisations.dependencies import OrganisationServiceDep, OrganisationStatsServiceDep
-from app.organisations.schemas import ApercuOrganisation, MonActivite, OrganisationCreate, RecommandationsResponse, RecouvrementCompare, OrganisationRead, OrganisationStats, OrganisationUpdate
-from app.users.dependencies import CurrentSuperAdminDep, CurrentUserDep
+from app.organisations.schemas import ApercuOrganisation, ConsommationIA, MonActivite, OrganisationCreate, RecommandationsResponse, RecouvrementCompare, OrganisationRead, OrganisationStats, OrganisationUpdate
+from app.users.dependencies import CurrentAdminDep, CurrentSuperAdminDep, CurrentUserDep
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
@@ -52,6 +52,24 @@ async def get_my_organisation_stats(
     if current_user.organisation_id is None:
         raise NotFoundException("Le SUPER_ADMIN n'appartient a aucune organisation")
     return await service.get_stats(current_user.organisation_id, periode_jours)
+
+
+@router.get("/me/consommation-ia", response_model=list[ConsommationIA])
+async def consommation_ia(
+    current_user: CurrentAdminDep,
+    jours: int = Query(30, ge=1, le=365, description="Fenetre d'observation"),
+) -> list[ConsommationIA]:
+    """Ce que chaque fonction IA a consomme, la plus lourde en tete.
+
+    Reservee aux administrateurs : c'est une donnee de gestion, pas de travail.
+    Un agent n'a pas a savoir ce que coute le bouton qu'on lui demande
+    d'utiliser — il finirait par ne plus l'utiliser.
+
+    Lecture seule et hors du metier : aucune decision de l'application ne
+    s'appuie sur ce journal, et rien ne doit se mettre a en dependre.
+    """
+    lignes = await consommation(current_user.organisation_id, jours)
+    return [ConsommationIA(**vars(ligne)) for ligne in lignes]
 
 
 @router.get("/me/mon-activite", response_model=MonActivite)
@@ -155,7 +173,7 @@ async def interroger_assistant_portefeuille(
 
     echanges = [{"role": tour.role, "content": tour.contenu} for tour in data.echanges]
     reponse, modele = await assistant.repondre(
-        faits, echanges, system=SYSTEM_PORTEFEUILLE, entete=ENTETE_PORTEFEUILLE
+        faits, echanges, system=SYSTEM_PORTEFEUILLE, entete=ENTETE_PORTEFEUILLE, fonction="assistant_portefeuille"
     )
     return AssistantResponse(reponse=reponse, appuis=_appuis_portefeuille(stats), modele=modele)
 

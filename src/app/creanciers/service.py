@@ -1,7 +1,12 @@
 from app.core.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
 from app.creanciers.models import Creancier
 from app.creanciers.repository import CreancierRepository
-from app.creanciers.schemas import CreancierCreate, CreancierUpdate
+from app.creanciers.schemas import (
+    CreancierCreate,
+    CreancierRepertoire,
+    CreancierUpdate,
+    OrigineCreancier,
+)
 from app.users.models import User
 
 
@@ -34,6 +39,30 @@ class CreancierService:
         return await self.repository.list(
             skip=skip, limit=limit, search=search, organisation_id=self.current_user.organisation_id
         )
+
+    async def repertoire(self, search: str | None = None) -> list[CreancierRepertoire]:
+        """Tous ceux a qui de l'argent est du, entites propres et clients reunis.
+
+        Distinct de list_creanciers, qui ne rend que les entites propres : ce
+        sont les seules qu'on puisse CHOISIR comme creancier d'un dossier. Un
+        client qui serait son propre creancier se declare par la case
+        « le creancier est le client », pas en se selectionnant lui-meme.
+        """
+        lignes = await self.repository.repertoire(
+            self.current_user.organisation_id, search=search
+        )
+        return [
+            CreancierRepertoire(
+                origine=OrigineCreancier(origine),
+                id=identifiant,
+                nom=nom,
+                email=email,
+                telephone=telephone,
+                adresse=adresse,
+                nb_dossiers=nb,
+            )
+            for origine, identifiant, nom, email, telephone, adresse, nb in lignes
+        ]
 
     async def update_creancier(self, creancier_id: int, data: CreancierUpdate) -> Creancier:
         creancier = await self.get_creancier(creancier_id)

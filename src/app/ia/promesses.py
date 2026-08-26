@@ -17,6 +17,7 @@ from decimal import Decimal
 import anthropic
 
 from app.core.config import settings
+from app.ia import journal
 from app.core.exceptions import BadRequestException
 from app.relances.models import Relance
 
@@ -153,6 +154,7 @@ class ExtractionPromessesIA:
         lot: list[Relance],
         soldes: dict[int, Decimal],
     ) -> tuple[list[EngagementExtrait], str]:
+        chrono = journal.Chrono()
         try:
             reponse = await client.beta.messages.create(
                 model=settings.anthropic_model,
@@ -177,12 +179,22 @@ class ExtractionPromessesIA:
             )
         except anthropic.APIStatusError as e:
             logger.warning("Extraction des promesses indisponible : %s", e)
+            await journal.enregistrer(
+                "extraction_promesses", settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException(
                 "L'extraction des promesses est momentanement indisponible."
             ) from e
         except anthropic.APIConnectionError as e:
             logger.warning("Extraction des promesses injoignable : %s", e)
+            await journal.enregistrer(
+                "extraction_promesses", settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException("Le service d'extraction est injoignable.") from e
+
+        await journal.enregistrer(
+            "extraction_promesses", settings.anthropic_model, chrono, reponse=reponse
+        )
 
         if reponse.stop_reason == "refusal":
             raise BadRequestException("L'extraction a refuse ce lot de comptes rendus.")

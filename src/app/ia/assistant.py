@@ -16,6 +16,7 @@ import logging
 import anthropic
 
 from app.core.config import settings
+from app.ia import journal
 from app.core.exceptions import BadRequestException
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,10 @@ class AssistantIA:
         *,
         system: str = SYSTEM,
         entete: str = ENTETE_CREANCE,
+        # Le meme service sert la fiche creance et le tableau de bord. Sans ce
+        # nom, le journal de consommation les confondrait sous une seule ligne
+        # et on ne saurait pas lequel des deux ecrans coute.
+        fonction: str = "assistant_creance",
     ) -> tuple[str, str]:
         """Renvoie (reponse, modele).
 
@@ -137,6 +142,7 @@ class AssistantIA:
             *echanges[-MAX_TOURS:],
         ]
 
+        chrono = journal.Chrono()
         try:
             reponse = await client.beta.messages.create(
                 model=settings.anthropic_model,
@@ -149,10 +155,20 @@ class AssistantIA:
             )
         except anthropic.APIStatusError as e:
             logger.warning("Assistant indisponible : %s", e)
+            await journal.enregistrer(
+                fonction, settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException("L'assistant est momentanement indisponible.") from e
         except anthropic.APIConnectionError as e:
             logger.warning("Assistant injoignable : %s", e)
+            await journal.enregistrer(
+                fonction, settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException("Le service d'assistance est injoignable.") from e
+
+        await journal.enregistrer(
+            fonction, settings.anthropic_model, chrono, reponse=reponse
+        )
 
         if reponse.stop_reason == "refusal":
             raise BadRequestException("L'assistant a refuse de repondre a cette demande.")

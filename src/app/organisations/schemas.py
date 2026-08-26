@@ -259,3 +259,21 @@ class OrganisationStats(BaseModel):
     previsions: list[PrevisionMois]
     productivite: list[LigneProductivite]
     alertes: list[Alerte]
+
+
+class ConsommationIA(BaseModel):
+    """Ce qu'une fonction IA a consomme sur la fenetre demandee.
+
+    Rendu aux administrateurs seuls : c'est une donnee de gestion, pas de
+    travail. Un agent n'a pas a savoir combien coute le bouton qu'on lui
+    demande d'utiliser — il finirait par ne plus l'utiliser.
+    """
+
+    fonction: str
+    appels: int
+    #: Comptes a part : un appel echoue apres avoir consomme des jetons se
+    #: facture quand meme, et un pic d'echecs est ce qu'on veut voir.
+    echecs: int
+    jetons_entree: int
+    jetons_sortie: int
+    duree_moyenne_ms: int

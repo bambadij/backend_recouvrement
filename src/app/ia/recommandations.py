@@ -17,6 +17,7 @@ import logging
 import anthropic
 
 from app.core.config import settings
+from app.ia import journal
 from app.core.exceptions import BadRequestException
 from app.organisations.schemas import OrganisationStats
 
@@ -127,6 +128,7 @@ class RecommandationsIA:
         """Renvoie (recommandations, modele)."""
         client = self._obtenir_client()
 
+        chrono = journal.Chrono()
         try:
             reponse = await client.beta.messages.create(
                 model=settings.anthropic_model,
@@ -150,12 +152,22 @@ class RecommandationsIA:
             )
         except anthropic.APIStatusError as e:
             logger.warning("Recommandations indisponibles : %s", e)
+            await journal.enregistrer(
+                "recommandations", settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException(
                 "Les recommandations sont momentanement indisponibles."
             ) from e
         except anthropic.APIConnectionError as e:
             logger.warning("Recommandations injoignables : %s", e)
+            await journal.enregistrer(
+                "recommandations", settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
             raise BadRequestException("Le service de recommandations est injoignable.") from e
+
+        await journal.enregistrer(
+            "recommandations", settings.anthropic_model, chrono, reponse=reponse
+        )
 
         if reponse.stop_reason == "refusal":
             raise BadRequestException("Les recommandations ont ete refusees pour ce portefeuille.")
