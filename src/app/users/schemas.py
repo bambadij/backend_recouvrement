@@ -25,6 +25,23 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class UserSelfUpdate(BaseModel):
+    """Champs qu'un utilisateur peut modifier sur SON propre compte.
+
+    Volontairement sans `role`, `organisation_id` ni `is_active` : les exposer ici
+    laisserait n'importe quel agent se promouvoir ADMIN ou changer d'organisation.
+    Ces champs restent l'apanage de PATCH /users/{id}, garde par CurrentAdminDep.
+
+    Le mot de passe actuel est exige pour en definir un nouveau : un jeton vole
+    suffirait sinon a verrouiller le compte de son proprietaire.
+    """
+
+    nom: str | None = None
+    prenom: str | None = None
+    mot_de_passe_actuel: str | None = None
+    nouveau_mot_de_passe: str | None = Field(default=None, min_length=8)
+
+
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

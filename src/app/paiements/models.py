@@ -18,6 +18,11 @@ class ModePaiement(str, enum.Enum):
     ESPECES = "ESPECES"
     CARTE = "CARTE"
     PRELEVEMENT = "PRELEVEMENT"
+    # Encaissement anterieur a l'entree du dossier dans l'outil, repris depuis la
+    # colonne « montant regle » d'un fichier d'import. Le moyen de paiement reel
+    # est inconnu : le distinguer evite de le faire passer pour un virement, et
+    # permet de le filtrer dans les analyses d'activite des agents.
+    REPRISE = "REPRISE"
 
 
 class Paiement(Base):

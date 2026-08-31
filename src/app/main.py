@@ -4,21 +4,33 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.clients import models as clients_models  # noqa: F401
+from app.clients.router import router as clients_router
 from app.core.bootstrap import bootstrap_super_admin
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.exceptions import AppException, app_exception_handler
 from app.creances import models as creances_models  # noqa: F401
 from app.creances.router import router as creances_router
+from app.creanciers import models as creanciers_models  # noqa: F401
+from app.creanciers.router import router as creanciers_router
 from app.debiteurs import models as debiteurs_models  # noqa: F401
 from app.debiteurs.router import router as debiteurs_router
+from app.documents import models as documents_models  # noqa: F401
+from app.documents.router import router as documents_router
+from app.dossiers import models as dossiers_models  # noqa: F401
+from app.dossiers.router import router as dossiers_router
 from app.imports.router import router as imports_router
 from app.organisations import models as organisations_models  # noqa: F401
 from app.organisations.router import router as organisations_router
 from app.paiements import models as paiements_models  # noqa: F401
 from app.paiements.router import router as paiements_router
+from app.promesses import models as promesses_models  # noqa: F401
+from app.promesses.router import router as promesses_router
 from app.relances import models as relances_models  # noqa: F401
 from app.relances.router import router as relances_router
+from app.segmentation import models as segmentation_models  # noqa: F401
+from app.segmentation.router import router as segmentation_router
 from app.users import models as users_models  # noqa: F401
 from app.users.router import auth_router, router as users_router
 
@@ -51,10 +63,16 @@ app.add_exception_handler(AppException, app_exception_handler)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(organisations_router)
+app.include_router(clients_router)
+app.include_router(creanciers_router)
 app.include_router(debiteurs_router)
+app.include_router(dossiers_router)
 app.include_router(creances_router)
 app.include_router(paiements_router)
 app.include_router(relances_router)
+app.include_router(promesses_router)
+app.include_router(segmentation_router)
+app.include_router(documents_router)
 app.include_router(imports_router)
 
 

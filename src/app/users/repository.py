@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.users.models import RoleUtilisateur, User
@@ -8,6 +8,17 @@ from app.users.schemas import UserUpdate
 class UserRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    @staticmethod
+    def _portee(organisation_id: int | None):
+        """Filtre d'organisation, ou predicat neutre pour une vue plateforme.
+
+        organisation_id None signifie « toutes les organisations » : le SUPER_ADMIN
+        consulte alors le parc entier. Renvoyer true() plutot que d'omettre la clause
+        garde la forme des requetes identique dans les deux cas.
+        """
+        return User.organisation_id == organisation_id if organisation_id is not None else true()
+
 
     async def create(
         self,
@@ -43,7 +54,7 @@ class UserRepository:
     ) -> list[User]:
         query = select(User)
         if organisation_id is not None:
-            query = query.where(User.organisation_id == organisation_id)
+            query = query.where(self._portee(organisation_id))
         query = query.order_by(User.id).offset(skip).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())
@@ -58,12 +69,40 @@ class UserRepository:
         await self.db.refresh(user)
         return user
 
+    async def update_profil(
+        self, user: User, nom: str | None, prenom: str | None, hashed_password: str | None
+    ) -> User:
+        """Ecrit uniquement les champs de profil, nommes un par un.
+
+        Pas de model_dump() ici, contrairement a update() : passer un dict au
+        setattr ouvrirait la porte a l'ecriture de tout champ present dans le
+        payload, role compris.
+        """
+        if nom is not None:
+            user.nom = nom
+        if prenom is not None:
+            user.prenom = prenom
+        if hashed_password is not None:
+            user.hashed_password = hashed_password
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
     async def delete(self, user: User) -> None:
         await self.db.delete(user)
         await self.db.commit()
 
-    async def count(self, organisation_id: int) -> int:
+    async def count_par_organisation(self) -> dict[int, int]:
+        """Nombre d'utilisateurs par organisation, en une requete pour toutes."""
         result = await self.db.execute(
-            select(func.count()).select_from(User).where(User.organisation_id == organisation_id)
+            select(User.organisation_id, func.count())
+            .where(User.organisation_id.isnot(None))
+            .group_by(User.organisation_id)
+        )
+        return {org: nb for org, nb in result.all()}
+
+    async def count(self, organisation_id: int | None) -> int:
+        result = await self.db.execute(
+            select(func.count()).select_from(User).where(self._portee(organisation_id))
         )
         return result.scalar_one()

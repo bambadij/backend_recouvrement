@@ -1,7 +1,17 @@
+from datetime import date
+from decimal import Decimal
+
 from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
 from app.debiteurs.models import Debiteur
 from app.debiteurs.repository import DebiteurRepository
-from app.debiteurs.schemas import DebiteurCreate, DebiteurUpdate
+from app.debiteurs.schemas import (
+    CanalDebiteur,
+    DebiteurCreate,
+    DebiteurUpdate,
+    DelaiReglement,
+    FactureDebiteur,
+    FaitsDebiteur,
+)
 from app.users.models import User
 
 
@@ -48,3 +58,88 @@ class DebiteurService:
         debiteur = await self.get_debiteur(debiteur_id)
         self._writable_organisation_id()
         await self.repository.delete(debiteur)
+
+    async def faits_debiteur(self, debiteur_id: int) -> FaitsDebiteur:
+        """L'etat chiffre du debiteur, calcule ici et nulle part ailleurs.
+
+        Situe une facture dans l'histoire de celui qui la doit : la page de
+        detail n'en montre qu'une, alors que le choix du canal, du ton et de
+        l'echeancier se prend au vu de son comportement d'ensemble.
+        """
+        debiteur = await self.get_debiteur(debiteur_id)
+        lignes = await self.repository.lignes_creances(debiteur_id)
+        aujourdhui = date.today()
+
+        soldees = [ligne for ligne in lignes if ligne.statut.value == "SOLDEE"]
+        dates_solde = await self.repository.dates_solde([ligne.id for ligne in soldees])
+
+        delais = []
+        for ligne in soldees:
+            date_solde = dates_solde.get(ligne.id)
+            # Une facture soldee sans aucun paiement enregistre existe : statut
+            # bascule a la main, remise gracieuse, ecriture passee ailleurs. On
+            # ne peut pas en tirer de delai, on la laisse de cote plutot que
+            # d'inventer une date.
+            if date_solde is None:
+                continue
+            delais.append(
+                DelaiReglement(
+                    reference=ligne.reference,
+                    date_echeance=ligne.date_echeance,
+                    date_solde=date_solde,
+                    jours=(date_solde - ligne.date_echeance).days,
+                )
+            )
+        delais.sort(key=lambda d: d.date_solde)
+
+        canaux = []
+        reponses = 0
+        for canal, nb, avec_reponse in await self.repository.compter_relances(debiteur_id):
+            reponses += avec_reponse
+            canaux.append(
+                CanalDebiteur(canal=canal.value, envoyees=nb, avec_reponse=avec_reponse)
+            )
+        canaux.sort(key=lambda c: c.envoyees, reverse=True)
+
+        promesses = {
+            statut.value: nb for statut, nb in await self.repository.compter_promesses(debiteur_id)
+        }
+
+        # Encours : les creances annulees ne sont plus dues, les soldees valent zero.
+        encours = sum(
+            (ligne.montant_restant for ligne in lignes if ligne.statut.value not in ("SOLDEE", "ANNULEE")),
+            Decimal(0),
+        )
+
+        factures = sorted(
+            (
+                FactureDebiteur(
+                    reference=ligne.reference,
+                    montant_initial=ligne.montant_initial,
+                    montant_restant=ligne.montant_restant,
+                    statut=ligne.statut.value,
+                    date_echeance=ligne.date_echeance,
+                    jours_retard=(aujourdhui - ligne.date_echeance).days,
+                )
+                for ligne in lignes
+            ),
+            key=lambda f: f.date_echeance,
+        )
+
+        return FaitsDebiteur(
+            nom=f"{debiteur.prenom} {debiteur.nom}".strip(),
+            entreprise=debiteur.entreprise,
+            # La date d'emission fait foi ; la date de saisie ne sert que de
+            # repli sur les lignes anterieures a ce champ.
+            premiere_creance=min(
+                (ligne.date_facture or ligne.date_saisie for ligne in lignes), default=None
+            ),
+            nb_creances=len(lignes),
+            nb_soldees=len(soldees),
+            encours_total=encours,
+            factures=factures,
+            canaux=canaux,
+            reponses_tracees=reponses > 0,
+            delais=delais,
+            promesses=promesses,
+        )

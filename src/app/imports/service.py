@@ -13,7 +13,11 @@ from app.creances.schemas import CreanceCreate
 from app.creances.service import CreanceService
 from app.debiteurs.repository import DebiteurRepository
 from app.debiteurs.schemas import DebiteurCreate
+from app.debiteurs.telephone import normaliser as normaliser_telephone
 from app.imports.schemas import ImportPreview, ImportResult, ImportRowError
+from app.paiements.models import ModePaiement
+from app.paiements.schemas import PaiementCreate
+from app.paiements.service import PaiementService
 from app.users.models import User
 
 # En-tête normalisé -> champ canonique
@@ -62,6 +66,20 @@ HEADER_MAP = {
     "status": "statut",
     "description": "description",
     "libelle": "description",
+    # Contexte du dossier — axes de segmentation. « financeur » n'est pas le
+    # débiteur : c'est qui doit effectivement payer (famille, bourse, entreprise).
+    "etablissement": "etablissement",
+    "ecole": "etablissement",
+    "structure": "etablissement",
+    "site": "etablissement",
+    "cycle": "cycle",
+    "niveau": "cycle",
+    "classe": "cycle",
+    "filiere": "cycle",
+    "financeur": "financeur",
+    "bailleur": "financeur",
+    "payeur": "financeur",
+    "sourcefinancement": "financeur",
     # Nom du débiteur en un seul champ (ex. société) + personne de contact.
     # « client » et « nomclient » restent acceptés : les fichiers historiques
     # des organisations utilisent encore ce libellé pour désigner le débiteur.
@@ -106,6 +124,9 @@ TEMPLATE_HEADERS = [
     "date_echeance",
     "statut",
     "description",
+    "etablissement",
+    "cycle",
+    "financeur",
 ]
 
 
@@ -147,10 +168,15 @@ def _parse_date(value: object) -> date | None:
 
 class ImportService:
     def __init__(
-        self, debiteur_repository: DebiteurRepository, creance_service: CreanceService, current_user: User
+        self,
+        debiteur_repository: DebiteurRepository,
+        creance_service: CreanceService,
+        paiement_service: PaiementService,
+        current_user: User,
     ) -> None:
         self.debiteur_repository = debiteur_repository
         self.creance_service = creance_service
+        self.paiement_service = paiement_service
         self.current_user = current_user
 
     def _organisation_id(self) -> int:
@@ -294,6 +320,11 @@ class ImportService:
                 "date_facture": date_facture,
                 "date_echeance": echeance,
                 "statut": statut,
+                # Colonnes facultatives : absentes du modele standard, elles ne
+                # bloquent pas un fichier qui ne les porte pas.
+                "etablissement": str(row.get("etablissement") or "").strip() or None,
+                "cycle": str(row.get("cycle") or "").strip() or None,
+                "financeur": str(row.get("financeur") or "").strip() or None,
             },
             "montant_regle": montant_regle,
         }
@@ -320,15 +351,28 @@ class ImportService:
 
     # ---------- Import réel ----------
 
-    async def commit(self, filename: str, content: bytes) -> ImportResult:
+    async def commit(self, filename: str, content: bytes, dossier_id: int) -> ImportResult:
+        """Importe le fichier dans un dossier existant.
+
+        Le dossier est choisi par l'agent, pas devine : un fichier correspond a
+        une demande recue d'un client — les trente etudiants d'une ecole entrent
+        dans le dossier que cette ecole a confie.
+        """
         rows = self._parse_file(filename, content)
         organisation_id = self._organisation_id()
+        # 404 si le dossier appartient a une autre organisation.
+        await self.creance_service.dossier_service.get_dossier(dossier_id)
 
         debiteurs_crees = 0
+        paiements_repris = 0
         debiteurs_reutilises = 0
         creances_creees = 0
         rejets: list[ImportRowError] = []
+        # Caches de la passe en cours, sur la forme canonique du telephone et sur
+        # l'email : deux lignes du meme fichier designant la meme personne doivent
+        # se rejoindre sans aller-retour en base.
         cache_tel: dict[str, int] = {}
+        cache_email: dict[str, int] = {}
 
         for row in rows:
             ligne = row["__ligne__"]
@@ -338,10 +382,14 @@ class ImportService:
                 continue
             try:
                 debiteur_id = None
-                telephone = record["telephone"]
+                telephone = normaliser_telephone(record["telephone"])
+                email = (record["debiteur"].email or "").strip().lower() or None
+
+                # Telephone d'abord : c'est l'identifiant le plus souvent renseigne.
                 if telephone:
                     if telephone in cache_tel:
                         debiteur_id = cache_tel[telephone]
+                        debiteurs_reutilises += 1
                     else:
                         existant = await self.debiteur_repository.get_by_telephone(telephone, organisation_id)
                         if existant is not None:
@@ -349,29 +397,85 @@ class ImportService:
                             debiteurs_reutilises += 1
                             cache_tel[telephone] = debiteur_id
 
+                # Email ensuite : il porte une contrainte d'unicite en base, donc
+                # sans ce rattrapage la creation echouerait au lieu de reutiliser.
+                if debiteur_id is None and email:
+                    if email in cache_email:
+                        debiteur_id = cache_email[email]
+                        debiteurs_reutilises += 1
+                    else:
+                        existant = await self.debiteur_repository.get_by_email(email, organisation_id)
+                        if existant is not None:
+                            debiteur_id = existant.id
+                            debiteurs_reutilises += 1
+                            cache_email[email] = debiteur_id
+
                 if debiteur_id is None:
                     debiteur = await self.debiteur_repository.create(record["debiteur"], organisation_id)
                     debiteur_id = debiteur.id
                     debiteurs_crees += 1
-                    if telephone:
-                        cache_tel[telephone] = debiteur_id
+
+                if telephone:
+                    cache_tel.setdefault(telephone, debiteur_id)
+                if email:
+                    cache_email.setdefault(email, debiteur_id)
+
+                donnees_creance = dict(record["creance"])
+                montant_regle = record.get("montant_regle") or Decimal("0")
+                # Une creance qu'on va payer naît EN_COURS, quoi que dise le
+                # fichier : c'est le paiement qui la solde, et enregistrer_paiement
+                # refuse d'encaisser sur une creance deja SOLDEE. Une ligne
+                # « Soldee » avec son reglement complet — le cas le plus normal
+                # d'une reprise de stock — etait donc rejetee, en laissant
+                # derriere elle une facture marquee soldee dont le restant du
+                # valait encore la totalite.
+                if montant_regle > 0:
+                    donnees_creance["statut"] = StatutCreance.EN_COURS
 
                 creance = await self.creance_service.create_creance(
-                    CreanceCreate(debiteur_id=debiteur_id, **record["creance"])
+                    CreanceCreate(debiteur_id=debiteur_id, dossier_id=dossier_id, **donnees_creance)
                 )
                 creances_creees += 1
-                # Reflète le montant déjà réglé (fichier source) : le restant passe au solde,
-                # et la créance devient SOLDEE si tout est payé.
-                montant_regle = record.get("montant_regle") or Decimal("0")
+                # Montant déjà réglé dans le fichier source : on enregistre un vrai
+                # paiement, pas une simple décrémentation du restant. Sans cette ligne
+                # dans « paiements », le montant recouvré du tableau de bord ignorerait
+                # tout ce qui a été encaissé avant l'entrée du dossier dans l'outil,
+                # alors que le restant, lui, en tient compte — les deux chiffres se
+                # contrediraient. create_paiement décrémente la créance ET trace
+                # l'encaissement, d'où le passage par le service des paiements.
                 if montant_regle > 0:
-                    await self.creance_service.enregistrer_paiement(creance.id, montant_regle)
+                    await self.paiement_service.create_paiement(
+                        PaiementCreate(
+                            creance_id=creance.id,
+                            montant=montant_regle,
+                            # Date de saisie de la créance, c'est-à-dire le jour de
+                            # l'import : la date réelle de l'encaissement n'est pas
+                            # dans le fichier, on ne l'invente pas.
+                            date_paiement=creance.date_saisie,
+                            mode_paiement=ModePaiement.REPRISE,
+                            notes="Montant déjà réglé, repris du fichier d'import",
+                        )
+                    )
+                    paiements_repris += 1
             except Exception as exc:  # noqa: BLE001 — on rejette la ligne sans casser l'import global
+                # Une violation de contrainte laisse la session en echec : sans ce
+                # rollback, toutes les lignes suivantes seraient rejetees a leur tour
+                # avec « transaction has been rolled back », y compris les valides.
+                await self.debiteur_repository.rollback()
+                # Le rollback EXPIRE tous les objets ORM de la session, dont
+                # current_user. Le premier acces a l'un de ses champs, a la ligne
+                # suivante, declenche alors une lecture paresseuse hors contexte
+                # async : « greenlet_spawn has not been called ». Toutes les
+                # lignes restantes tombaient ainsi, quelle que soit leur validite
+                # — une seule ligne fautive faisait perdre tout ce qui la suivait.
+                await self.debiteur_repository.db.refresh(self.current_user)
                 rejets.append(ImportRowError(ligne=ligne, message=str(exc)[:200]))
 
         return ImportResult(
             debiteurs_crees=debiteurs_crees,
             debiteurs_reutilises=debiteurs_reutilises,
             creances_creees=creances_creees,
+            paiements_repris=paiements_repris,
             lignes_rejetees=rejets,
         )
 

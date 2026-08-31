@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.exceptions import ForbiddenException, UnauthorizedException
 from app.core.security import decode_access_token
+from app.ia.journal import Appelant, appelant
 from app.organisations.dependencies import get_organisation_service
 from app.organisations.service import OrganisationService
 from app.users.models import RoleUtilisateur, User
@@ -33,7 +34,20 @@ async def get_current_user(
     payload = decode_access_token(credentials.credentials)
     if payload is None or "sub" not in payload:
         raise UnauthorizedException("Token invalide ou expire")
-    return await service.get_user(int(payload["sub"]))
+    utilisateur = await service.get_user(int(payload["sub"]))
+
+    # Qui appelle, pour le journal de consommation des modeles. Pose ici parce
+    # que c'est le seul point par ou passe toute requete authentifiee : les six
+    # fonctions qui appellent un modele ont des signatures differentes et n'ont
+    # pour la plupart aucune raison de connaitre l'utilisateur. Leur imposer un
+    # argument de comptabilite melangerait la mesure au metier.
+    appelant.set(
+        Appelant(
+            organisation_id=utilisateur.organisation_id,
+            agent_nom=f"{utilisateur.prenom} {utilisateur.nom}".strip() or None,
+        )
+    )
+    return utilisateur
 
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]

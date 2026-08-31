@@ -8,15 +8,18 @@ from app.creances.dependencies import get_creance_service
 from app.creances.service import CreanceService
 from app.debiteurs.repository import DebiteurRepository
 from app.imports.service import ImportService
+from app.paiements.dependencies import get_paiement_service
+from app.paiements.service import PaiementService
 from app.users.dependencies import CurrentUserDep
 
 
 def get_import_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     creance_service: Annotated[CreanceService, Depends(get_creance_service)],
+    paiement_service: Annotated[PaiementService, Depends(get_paiement_service)],
     current_user: CurrentUserDep,
 ) -> ImportService:
-    return ImportService(DebiteurRepository(db), creance_service, current_user)
+    return ImportService(DebiteurRepository(db), creance_service, paiement_service, current_user)
 
 
 ImportServiceDep = Annotated[ImportService, Depends(get_import_service)]

@@ -17,6 +17,26 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------
+-- 0. Cas frequent : l'application a demarre AVANT la migration.
+--
+--    Son create_all() a alors cree une table "debiteurs" vide, qui empeche le
+--    renommage de "clients". On la supprime — mais seulement si elle est vide :
+--    si elle contient des lignes, c'est que la migration a deja tourne et il ne
+--    faut surtout pas ecraser les donnees.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+    IF to_regclass('public.debiteurs') IS NOT NULL THEN
+        IF (SELECT count(*) FROM public.debiteurs) > 0 THEN
+            RAISE EXCEPTION
+                'La table "debiteurs" existe deja et contient des donnees : migration deja appliquee, rien a faire.';
+        END IF;
+        DROP TABLE public.debiteurs;
+        RAISE NOTICE 'Table "debiteurs" vide (creee par create_all) supprimee avant le renommage.';
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- 1. La table des debiteurs (ceux qui doivent de l'argent) s'appelait "clients"
 -- ---------------------------------------------------------------------------
 ALTER TABLE clients RENAME TO debiteurs;

@@ -8,6 +8,8 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.creances.models import Creance
+    from app.promesses.models import Promesse
+    from app.relances.models import Relance
 
 
 class Debiteur(Base):
@@ -22,6 +24,10 @@ class Debiteur(Base):
     prenom: Mapped[str] = mapped_column(String(100))
     email: Mapped[str | None] = mapped_column(String(255))
     telephone: Mapped[str | None] = mapped_column(String(30))
+    # Forme canonique du telephone (chiffres seuls, indicatif retire), maintenue
+    # par le repository. Sert uniquement a comparer : c'est « telephone » qui est
+    # affiche. Indexee, car c'est la cle de dedoublonnage a chaque ligne importee.
+    telephone_normalise: Mapped[str | None] = mapped_column(String(20), index=True)
     adresse: Mapped[str | None] = mapped_column(String(255))
     ville: Mapped[str | None] = mapped_column(String(100))
     code_postal: Mapped[str | None] = mapped_column(String(20))
@@ -34,3 +40,5 @@ class Debiteur(Base):
     )
 
     creances: Mapped[list["Creance"]] = relationship(back_populates="debiteur", cascade="all, delete-orphan")
+    relances: Mapped[list["Relance"]] = relationship(back_populates="debiteur", cascade="all, delete-orphan")
+    promesses: Mapped[list["Promesse"]] = relationship(back_populates="debiteur", cascade="all, delete-orphan")

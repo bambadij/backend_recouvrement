@@ -9,6 +9,9 @@ from app.creances.models import StatutCreance
 
 class CreanceBase(BaseModel):
     debiteur_id: int
+    #: Le dossier dont cette facture fait partie. Obligatoire : toute creance
+    #: appartient a une demande confiee par un client.
+    dossier_id: int
     # Numero de la facture d'origine, celui que le debiteur reconnait.
     numero_facture: str | None = None
     description: str | None = None
@@ -17,6 +20,11 @@ class CreanceBase(BaseModel):
     # connue, c'est elle — et non la date de saisie — qui date la creance.
     date_facture: date | None = None
     date_echeance: date
+
+    # Contexte du dossier : axes de segmentation, alimentes par l'import Excel.
+    etablissement: str | None = Field(default=None, max_length=255)
+    cycle: str | None = Field(default=None, max_length=100)
+    financeur: str | None = Field(default=None, max_length=255)
 
     @model_validator(mode="after")
     def _facture_avant_echeance(self) -> Self:
@@ -38,6 +46,9 @@ class CreanceUpdate(BaseModel):
     date_facture: date | None = None
     date_echeance: date | None = None
     statut: StatutCreance | None = None
+    etablissement: str | None = Field(default=None, max_length=255)
+    cycle: str | None = Field(default=None, max_length=100)
+    financeur: str | None = Field(default=None, max_length=255)
 
 
 class CreanceRead(BaseModel):
@@ -46,6 +57,7 @@ class CreanceRead(BaseModel):
     id: int
     organisation_id: int
     debiteur_id: int
+    dossier_id: int
     reference: str
     numero_facture: str | None
     description: str | None
@@ -55,5 +67,8 @@ class CreanceRead(BaseModel):
     date_saisie: date
     date_echeance: date
     statut: StatutCreance
+    etablissement: str | None
+    cycle: str | None
+    financeur: str | None
     created_at: datetime
     updated_at: datetime

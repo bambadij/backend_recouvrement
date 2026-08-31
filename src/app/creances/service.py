@@ -8,6 +8,7 @@ from app.creances.models import Creance, StatutCreance
 from app.creances.repository import CreanceRepository
 from app.creances.schemas import CreanceCreate, CreanceUpdate
 from app.debiteurs.service import DebiteurService
+from app.dossiers.service import DossierService
 from app.organisations.repository import OrganisationRepository
 from app.users.models import User
 
@@ -17,11 +18,13 @@ class CreanceService:
         self,
         repository: CreanceRepository,
         debiteur_service: DebiteurService,
+        dossier_service: DossierService,
         organisation_repository: OrganisationRepository,
         current_user: User,
     ) -> None:
         self.repository = repository
         self.debiteur_service = debiteur_service
+        self.dossier_service = dossier_service
         self.organisation_repository = organisation_repository
         self.current_user = current_user
 
@@ -33,6 +36,11 @@ class CreanceService:
     async def create_creance(self, data: CreanceCreate) -> Creance:
         organisation_id = self._writable_organisation_id()
         await self.debiteur_service.get_debiteur(data.debiteur_id)  # 404 si debiteur d'une autre organisation
+
+        # 404 si le dossier appartient a une autre organisation. Un dossier peut
+        # porter plusieurs debiteurs : aucun controle de correspondance ici.
+        await self.dossier_service.get_dossier(data.dossier_id)
+
         if data.reference:
             # Reference fournie : on verifie juste l'unicite.
             if await self.repository.get_by_reference(data.reference, organisation_id):
@@ -78,13 +86,38 @@ class CreanceService:
             raise NotFoundException(f"Creance {creance_id} introuvable")
         return creance
 
+    async def get_creance_par_reference(self, reference: str) -> Creance:
+        """Resolution par reference, pour les URLs lisibles du front.
+
+        La reference est unique PAR ORGANISATION, pas globalement : la portee du
+        depot est donc ce qui rend la resolution deterministe. Un super-admin,
+        sans organisation, verrait plusieurs candidats — d'ou le refus explicite
+        plutot qu'un premier resultat arbitraire.
+        """
+        if self.current_user.organisation_id is None:
+            raise NotFoundException(
+                "La resolution par reference demande une organisation : "
+                "une meme reference peut exister dans plusieurs d'entre elles"
+            )
+
+        creance = await self.repository.get_by_reference(reference, self.current_user.organisation_id)
+        if creance is None:
+            raise NotFoundException(f"Creance {reference} introuvable")
+        return creance
+
     async def list_creances(
-        self, skip: int = 0, limit: int = 100, debiteur_id: int | None = None, statut: StatutCreance | None = None
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        debiteur_id: int | None = None,
+        dossier_id: int | None = None,
+        statut: StatutCreance | None = None,
     ) -> list[Creance]:
         return await self.repository.list(
             skip=skip,
             limit=limit,
             debiteur_id=debiteur_id,
+            dossier_id=dossier_id,
             statut=statut,
             organisation_id=self.current_user.organisation_id,
         )

@@ -10,8 +10,9 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.debiteurs.models import Debiteur
+    from app.dossiers.models import Dossier
     from app.paiements.models import Paiement
-    from app.relances.models import Relance
+    from app.segmentation.models import Segmentation
 
 
 class StatutCreance(str, enum.Enum):
@@ -31,6 +32,10 @@ class Creance(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
     debiteur_id: Mapped[int] = mapped_column(ForeignKey("debiteurs.id", ondelete="CASCADE"), index=True)
+    # RESTRICT et non CASCADE : supprimer un dossier ne doit jamais faire
+    # disparaitre des impayes. Le service refuse la suppression d'un dossier
+    # qui porte encore des creances.
+    dossier_id: Mapped[int] = mapped_column(ForeignKey("dossiers.id", ondelete="RESTRICT"), index=True)
 
     # Reference interne, generee par l'application et unique par organisation.
     reference: Mapped[str] = mapped_column(String(50), index=True)
@@ -38,6 +43,14 @@ class Creance(Base):
     # absent des reprises de stock ou des creances non facturees).
     numero_facture: Mapped[str | None] = mapped_column(String(50), index=True)
     description: Mapped[str | None] = mapped_column(String(1000))
+
+    # Contexte du dossier, alimente par l'import Excel. Indexes : ce sont les axes
+    # de segmentation, donc les filtres de liste les plus frequents.
+    # Le financeur n'est pas le debiteur : il designe qui doit effectivement payer
+    # (famille, bourse, entreprise, ONG), ce qui change la strategie de relance.
+    etablissement: Mapped[str | None] = mapped_column(String(255), index=True)
+    cycle: Mapped[str | None] = mapped_column(String(100), index=True)
+    financeur: Mapped[str | None] = mapped_column(String(255), index=True)
 
     montant_initial: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     montant_restant: Mapped[Decimal] = mapped_column(Numeric(12, 2))
@@ -59,5 +72,8 @@ class Creance(Base):
     )
 
     debiteur: Mapped["Debiteur"] = relationship(back_populates="creances")
+    dossier: Mapped["Dossier"] = relationship(back_populates="creances")
     paiements: Mapped[list["Paiement"]] = relationship(back_populates="creance", cascade="all, delete-orphan")
-    relances: Mapped[list["Relance"]] = relationship(back_populates="creance", cascade="all, delete-orphan")
+    segmentation: Mapped["Segmentation | None"] = relationship(
+        back_populates="creance", cascade="all, delete-orphan", uselist=False
+    )

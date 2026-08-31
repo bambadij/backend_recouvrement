@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, status
 
 from app.core.security import create_access_token
 from app.users.dependencies import CurrentAdminDep, CurrentUserDep, UserServiceDep
-from app.users.schemas import LoginRequest, Token, UserCreate, UserRead, UserUpdate
+from app.users.schemas import LoginRequest, Token, UserCreate, UserRead, UserSelfUpdate, UserUpdate
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 router = APIRouter(prefix="/users", tags=["users"])
@@ -41,6 +41,12 @@ async def list_users(
 @router.get("/{user_id}", response_model=UserRead)
 async def get_user(user_id: int, service: UserServiceDep, current_admin: CurrentAdminDep) -> UserRead:
     user = await service.get_user_scoped(user_id, current_admin)
+    return UserRead.model_validate(user)
+
+
+@router.patch("/me", response_model=UserRead)
+async def update_me(data: UserSelfUpdate, current_user: CurrentUserDep, service: UserServiceDep) -> UserRead:
+    user = await service.update_me(current_user, data)
     return UserRead.model_validate(user)
 
 

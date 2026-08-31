@@ -1,21 +1,173 @@
-"""Service IA : analyse de dossiers, generation de messages de relance, priorisation.
+import logging
 
-A developper une fois le domaine metier (creances/paiements/relances) stabilise.
+import anthropic
+
+from app.debiteurs.models import Debiteur
+from app.core.config import settings
+from app.ia import journal
+from app.core.exceptions import BadRequestException
+from app.creances.models import Creance
+from app.ia.schemas import MessageRelanceRequest
+from app.organisations.models import Organisation
+from app.relances.models import Relance
+from app.users.models import User
+
+logger = logging.getLogger(__name__)
+
+#: Court : un message de relance fait quelques lignes. La marge couvre le
+#: raisonnement, qui est actif par defaut sur ce modele et compte dans max_tokens.
+MAX_TOKENS = 2000
+
+SYSTEM = """Tu rediges des messages de relance pour un cabinet de recouvrement senegalais.
+
+Regles absolues :
+- Ecris en francais, en vouvoyant, ton professionnel et courtois meme quand le message est ferme.
+- N'invente aucun fait : n'utilise que les montants, dates et echanges fournis.
+- Ne promets rien au nom du cabinet (pas de remise, pas de delai non demande).
+- Ne menace pas de poursuites sauf si le ton demande est « mise en demeure ».
+- Rends uniquement le corps du message, sans objet et sans en-tete.
+- Termine par une formule de politesse suivie du nom de l'agent en charge, puis du
+  nom du cabinet s'il est fourni. Si l'agent n'est pas fourni, ne signe pas.
+- Sois bref : le destinataire doit comprendre en un coup d'oeil combien il doit et pour quand.
 """
 
-from app.creances.models import Creance
-from app.ia.llm import LLMClient, get_llm_client
 
+class RedactionService:
+    """Redaction assistee des messages de relance.
 
-class IAService:
-    def __init__(self, llm_client: LLMClient | None = None) -> None:
-        self.llm_client = llm_client or get_llm_client()
+    Le service est volontairement sans etat : chaque appel reconstruit le contexte
+    depuis la base. L'appel part du backend et non du navigateur — une cle d'API
+    dans le front serait lisible par quiconque ouvre les outils de developpement.
+    """
 
-    async def analyser_dossier(self, creance: Creance) -> str:
-        raise NotImplementedError
+    def __init__(self) -> None:
+        self._client: anthropic.AsyncAnthropic | None = None
 
-    async def generer_message_relance(self, creance: Creance, type_relance: str) -> str:
-        raise NotImplementedError
+    @property
+    def disponible(self) -> bool:
+        return bool(settings.anthropic_api_key)
 
-    async def prioriser_creances(self, creances: list[Creance]) -> list[Creance]:
-        raise NotImplementedError
+    def _obtenir_client(self) -> anthropic.AsyncAnthropic:
+        if not self.disponible:
+            raise BadRequestException(
+                "La redaction assistee n'est pas configuree sur ce serveur. "
+                "Utilisez les modeles de message proposes dans le formulaire."
+            )
+        if self._client is None:
+            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        return self._client
+
+    @staticmethod
+    def _contexte(
+        creance: Creance,
+        debiteur: Debiteur | None,
+        relances: list[Relance],
+        agent: User | None,
+        organisation: Organisation | None,
+    ) -> str:
+        """Le dossier mis a plat, en texte, pour le modele.
+
+        Seuls des faits : ce qui n'est pas dans ce bloc ne doit pas apparaitre dans
+        le message rendu — la signature comprise, d'ou l'agent et le cabinet ici.
+        """
+        nom = f"{debiteur.prenom} {debiteur.nom}".strip() if debiteur else "le debiteur"
+        lignes = [
+            f"Debiteur : {nom}",
+            f"Reference de la creance : {creance.reference}",
+            f"Montant restant du : {creance.montant_restant} FCFA",
+            f"Montant initial : {creance.montant_initial} FCFA",
+            f"Echeance : {creance.date_echeance.isoformat()}",
+            f"Statut : {creance.statut.value}",
+        ]
+        if debiteur and debiteur.entreprise:
+            lignes.append(f"Entreprise : {debiteur.entreprise}")
+        if agent:
+            lignes.append(f"Agent en charge, signataire du message : {agent.prenom} {agent.nom}".rstrip())
+        if organisation:
+            lignes.append(f"Cabinet expediteur : {organisation.nom}")
+
+        if relances:
+            lignes.append("")
+            lignes.append("Historique des relances, de la plus ancienne a la plus recente :")
+            for r in relances[-8:]:
+                detail = f"- {r.date_relance.isoformat()} : {r.type_relance.value}, {r.statut.value}"
+                if r.resultat:
+                    detail += f" — retour du debiteur : {r.resultat}"
+                lignes.append(detail)
+        else:
+            lignes.append("")
+            lignes.append("Aucune relance n'a encore ete envoyee sur ce dossier.")
+        return "\n".join(lignes)
+
+    async def generer_message(
+        self,
+        creance: Creance,
+        debiteur: Debiteur | None,
+        relances: list[Relance],
+        demande: MessageRelanceRequest,
+        agent: User | None = None,
+        organisation: Organisation | None = None,
+        # « redaction » quand l'agent ouvre le formulaire, « brouillon » quand
+        # l'assistant produit le message de lui-meme : deux gestes de frequences
+        # tres differentes, que le journal doit pouvoir separer.
+        fonction: str = "redaction",
+    ) -> tuple[str, str]:
+        """Renvoie (message, modele). Leve BadRequestException si la redaction echoue."""
+        anthropic_client = self._obtenir_client()
+
+        consignes = [self._contexte(creance, debiteur, relances, agent, organisation), ""]
+        if demande.ton:
+            consignes.append(f"Registre demande : {demande.ton}.")
+        if demande.instruction:
+            consignes.append(f"Consigne de l'agent : {demande.instruction}")
+        consignes.append("Redige le message de relance.")
+
+        chrono = journal.Chrono()
+        try:
+            reponse = await anthropic_client.beta.messages.create(
+                model=settings.anthropic_model,
+                max_tokens=MAX_TOKENS,
+                # Une relance est une tache courte et cadree : effort faible suffit,
+                # et c'est ce qui tient la latence du bouton sous la seconde.
+                output_config={"effort": "low"},
+                system=SYSTEM,
+                messages=[{"role": "user", "content": "\n".join(consignes)}],
+                # Les classificateurs de surete peuvent decliner une demande. Le repli
+                # serveur rejoue la requete sur un autre modele dans le meme appel.
+                betas=["server-side-fallback-2026-07-01"],
+                fallbacks="default",
+            )
+        except anthropic.APIStatusError as e:
+            logger.warning("Redaction assistee indisponible : %s", e)
+            await journal.enregistrer(
+                fonction, settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
+            raise BadRequestException(
+                "La redaction assistee est momentanement indisponible. "
+                "Utilisez les modeles de message proposes dans le formulaire."
+            ) from e
+        except anthropic.APIConnectionError as e:
+            logger.warning("Redaction assistee injoignable : %s", e)
+            await journal.enregistrer(
+                fonction, settings.anthropic_model, chrono, erreur=str(e)[:300]
+            )
+            raise BadRequestException(
+                "Le service de redaction est injoignable. "
+                "Utilisez les modeles de message proposes dans le formulaire."
+            ) from e
+
+        await journal.enregistrer(
+            fonction, settings.anthropic_model, chrono, reponse=reponse
+        )
+
+        # A verifier AVANT de lire le contenu : sur un refus, content est vide ou partiel.
+        if reponse.stop_reason == "refusal":
+            raise BadRequestException(
+                "La redaction assistee a refuse cette demande. Reformulez la consigne "
+                "ou utilisez les modeles de message proposes."
+            )
+
+        message = "".join(bloc.text for bloc in reponse.content if bloc.type == "text").strip()
+        if not message:
+            raise BadRequestException("La redaction assistee n'a produit aucun texte.")
+        return message, reponse.model
